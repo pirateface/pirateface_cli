@@ -66,6 +66,12 @@ def _query(magnet):
 
 
 def _web_seed_from(query):
+    """(repo id, commit or None) from a magnet's web seed, or None when the line cannot be trusted.
+
+    A shard holds a bare magnet: the web seed's path is the only place the repo id appears, so the
+    host must be the site's own (or PF_API's) and the name a plain owner/name -- a shard must not
+    point a lookup at another server, at `..`, or at a truncated path.
+    """
     ws = query.get("ws") or []
     if len(ws) != 1:
         return None  # libtorrent honours every ws= in a magnet; a second one would be an unchecked server
@@ -136,7 +142,8 @@ def build():
 
 @functools.cache
 def _parsed():
-    """Every build in date order, each date's removals applied right after that shard.
+    """({repo_id: Entry}, removals_lost): every build in date order, each date's removals applied right
+    after that shard.
 
     A removal names an infohash, not a repo: it retires that torrent. Order matters: a removal deletes
     what is known at that date, so a model dropped and re-added later stays listed; applying every

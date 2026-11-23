@@ -58,6 +58,8 @@ def _problem(state):
     for field in ("leaseId", "revision"):
         if not isinstance(job.get(field), str):
             return f"job.{field} is missing or not a string"
+    if job.get("leaseId") != lease:
+        return "job.leaseId does not match the saved leaseId"
     repo = job.get("repoId")
     if not isinstance(repo, str):
         return "job.repoId is missing or not a string"
@@ -72,9 +74,6 @@ def _problem(state):
             return f"job.files[{index}] is {type(item).__name__}, not an object"
         if not isinstance(item.get("path"), str):
             return f"job.files[{index}].path is missing or not a string"
-        # Null is left alone on purpose: _job_size() reads it as "this lease does not say how big its
-        # files are", which is a work error it clears and pauses on. A present size must be a whole number
-        # of bytes: a string raises TypeError in sum(), and bool or float sum fine but are not byte counts.
         size = item.get("size")
         if size is not None and (isinstance(size, bool) or not isinstance(size, int)):
             return f"job.files[{index}].size is {type(size).__name__}, not a whole number of bytes"

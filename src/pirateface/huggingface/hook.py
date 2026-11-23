@@ -17,7 +17,7 @@ from pirateface.index import mirror
 FUNC = "_download_to_tmp_and_move"
 # FUNC isn't passed the repo id, so the outer functions record it here.
 OUTER = ("_hf_hub_download_to_cache_dir", "_hf_hub_download_to_local_dir")
-_repo = contextvars.ContextVar("pirateface_repo", default=None)
+_repo = contextvars.ContextVar("pirateface_repo", default=(None, None))
 
 
 def log(msg):
@@ -87,7 +87,7 @@ def _remember_repo(outer):
 
 
 def _from_torrent(filename, etag, dest):
-    repo_type, repo_id = _repo.get() or (None, None)
+    repo_type, repo_id = _repo.get()
     if repo_id is None or repo_type not in (None, "model"):
         return False
     # Set when Pirate Face answered for Hugging Face: the etag is then the listing's sha256 (or the cached
@@ -95,14 +95,11 @@ def _from_torrent(filename, etag, dest):
     answered = transport.ANSWERED.get((repo_id, filename))
     try:
         pf_only = api.pf_only(repo_id) is not None or answered is not None
-    except api.Unreadable:
-        # The site answered and we could not read it. Say so once per repo, then try the cached index
-        # and, failing that, let Hugging Face serve the file.
-        transport.report_unreadable(repo_id, "trying the cached index")
-        return _from_index(repo_id, filename, dest, etag, answered)
-    except api.Unreachable:
-        # The site is down. The cached index may still name this repo's swarm, so try that before
-        # handing the file to Hugging Face.
+    except (api.Unreadable, api.Unreachable) as e:
+        # The site is down, or answered and we could not read it: the cached index may still name this
+        # repo's swarm, so try it before handing the file to Hugging Face.
+        if isinstance(e, api.Unreadable):
+            transport.report_unreadable(repo_id, "trying the cached index")
         return _from_index(repo_id, filename, dest, etag, answered)
     src = torrent.fetch_file(repo_id, filename, config.PF_ONLY_STALL_TIMEOUT if pf_only else config.STALL_TIMEOUT)
     if not _place_checked(src, dest, etag):
@@ -111,13 +108,16 @@ def _from_torrent(filename, etag, dest):
     return True
 
 
+def _etag_hex(etag):
+    """An HF etag as the digest it names: no weak-validator prefix, no quotes."""
+    return (etag or "").removeprefix("W/").strip('"')
+
+
 def _from_index(repo_id, filename, dest, etag, answered=None):
     """Fetch the file from the swarm the cached index names, when Pirate Face cannot be reached.
 
-    The check that decides is the Hugging Face fingerprint the download already holds: it is what ties
-    these bytes to a repo and a revision. _place_checked writes the copy beside `dest`, compares that
-    fingerprint, and only replaces `dest` when it matches. Without a fingerprint there is nothing to
-    compare, so such a download is left to Hugging Face.
+    The check is the Hugging Face fingerprint the download already holds: it is what ties these bytes to a
+    repo and a revision. Without one there is nothing to compare, so the file is left to Hugging Face.
 
     `answered`: the cached index's own listing stood in for Hugging Face, so there is no fingerprint, only a
     cache key. The check is then the torrent's piece hashes, which the index's infohash commits to.
@@ -132,7 +132,7 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
     torrent_checked = answered is not None and answered["files"][filename][1] is None
     # Checked before the download, and on the shape _place_checked can compare -- it compares against
     # hexdigest(), which is lowercase, so normalise here rather than fetching a file that cannot match.
-    etag = (etag or "").removeprefix("W/").strip('"').lower()
+    etag = _etag_hex(etag).lower()
     if not torrent_checked and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", etag):
         raise torrent.Unavailable("Hugging Face gave no fingerprint to check the index's copy against")
     try:
@@ -153,14 +153,13 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
 
 
 def _place_checked(src, dest, etag, torrent_checked=False):
-    """Copy src to dest, hashing it on the way, and move it into place only if the fingerprint matches:
-    one read of the file instead of one to check and one to copy. HF etags are SHA-256 for LFS files, git blob
-    SHA-1 otherwise. Copy, not hard-link: HF makes its blobs read-only, which would lock libtorrent out of a
-    shared inode.
+    """Copy src to dest, hashing it on the way, and move it into place only if the fingerprint matches
+    (sha256 for LFS files, git blob sha1 otherwise). One read instead of one to check and one to copy;
+    copy, never a hard link: HF blobs are read-only, which would lock libtorrent out of a shared inode.
 
-    torrent_checked: there is no fingerprint (the cached index stood in for Hugging Face), and libtorrent counting
-    a piece only once it matches the torrent's hash is the check, so the bytes are copied as they are."""
-    etag = (etag or "").removeprefix("W/").strip('"')
+    torrent_checked: no fingerprint (the cached index stood in for Hugging Face), so libtorrent counting
+    a piece only once its hash matches is the check; the bytes are copied as they are."""
+    etag = _etag_hex(etag)
     if torrent_checked:
         h = None
     elif len(etag) == 64:

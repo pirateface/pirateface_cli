@@ -19,7 +19,7 @@ from pirateface.listing import info_problems, unsafe_path
 CACHE_DIR = Path(config.CACHE_DIR)
 _lock = threading.Lock()
 _session = None
-_handles = {}  # repo_id -> its RepoState once asked: a torrent handle, NO_SWARM, or the Unsafe that refused it
+_handles = {}  # repo_id -> its state once asked: a torrent handle, RepoState.NO_SWARM, or the Unsafe that refused it
 _wanted = {}
 _active = {}  # repo_id -> fetch_file calls currently downloading
 _setup = {}  # repo_id -> lock serialising handle setup
@@ -33,9 +33,8 @@ class Unavailable(Exception):
 
 
 class RepoState(enum.Enum):
-    """A repo's _handles state other than its torrent handle or the Unsafe that refused its listing."""
+    """A repo's _handles state other than its torrent handle: no usable swarm answer."""
 
-    UNASKED = "the site was never asked about the repo"
     NO_SWARM = "not listed, no usable answer, or no file list in time: Hugging Face serves it"
 
 
@@ -144,11 +143,6 @@ def _setup_lock(repo_id):
         return _setup.setdefault(repo_id, threading.Lock())
 
 
-def _remembered(repo_id):
-    with _lock:
-        return _handles.get(repo_id, RepoState.UNASKED)
-
-
 def _remember(repo_id, state):
     """One map says what happened to a repo, so nothing has to be kept in step with it."""
     with _lock:
@@ -239,7 +233,9 @@ def _handle(repo_id, resume=None, magnet=None, where=None):
     from the cache instead of the site.
     """
     from_index = magnet is not None
-    match _remembered(repo_id):
+    with _lock:
+        state = _handles.get(repo_id)
+    match state:
         case Unsafe() as refused:
             raise Unavailable(str(refused))  # a listing this client refused: same answer for every file
         case RepoState.NO_SWARM if magnet is None:
@@ -396,6 +392,45 @@ def swarm_files(repo_id, magnet=None, where=None):
         return [(_relative(ti, i), fs.file_size(i)) for i in real_files(fs)]
 
 
+def _revive_if_finished(repo_id, h, magnet):
+    """Re-add a finished handle (with resume data, so nothing is re-hashed), only while no other fetch
+    is using it; otherwise return h as-is. A "finished" torrent drops its web seed, so the next file
+    never gets bytes."""
+    if h.status().state != lt.torrent_status.finished:
+        return h
+    # Wait for another fetch to flush its last file -- every counted fetch decrements in a finally, so
+    # this drains; the wait can take as long as its flush plus any wait behind the global flush lock.
+    with _idle_cv:
+        while _active.get(repo_id):
+            _idle_cv.wait(5)
+    if h.status().state != lt.torrent_status.finished:  # still: no other fetch revived it meanwhile
+        return h
+    resume = _resume_data(h)
+    with _lock:
+        with contextlib.suppress(Exception):
+            _get_session().remove_torrent(h)
+        _handles.pop(repo_id, None)
+    h = _handle(repo_id, resume, magnet=magnet)
+    if h is None:
+        raise Unavailable()
+    return h
+
+
+def _wait_for_download(h, i, size, stall_timeout):
+    """Block until file i has size bytes; fail on a torrent error or on no bytes arriving (a stall -- not
+    on no piece finishing, which a slow but live swarm can exceed)."""
+    last_received, last_change = -1, time.monotonic()
+    while h.file_progress(lt.torrent_handle.piece_granularity)[i] < size:
+        st = h.status()
+        if st.errc.value():
+            raise RuntimeError(f"torrent error: {st.errc.message()}")
+        if st.total_payload_download != last_received:
+            last_received, last_change = st.total_payload_download, time.monotonic()
+        elif time.monotonic() - last_change > stall_timeout:
+            raise TimeoutError(f"stalled for {stall_timeout:.0f}s")
+        time.sleep(0.25)
+
+
 def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=None):
     counted = False
     try:
@@ -403,37 +438,15 @@ def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=Non
             h = _handle(repo_id, magnet=magnet)
             if h is None:
                 raise Unavailable()
-            # A model download fetches files one at a time. After the last wanted file
-            # completes the torrent goes "finished" and libtorrent drops the web seed,
-            # so the next file never gets bytes and stalls until PF_STALL_TIMEOUT.
-            # Re-add the handle (with resume data, so nothing already on disk is
-            # re-hashed) -- but only while no other fetch is using it, so parallel
-            # calls never yank a handle out from under each other.
-            if h.status().state == lt.torrent_status.finished:
-                # Another fetch may still be flushing its last file on this handle;
-                # wait for it to finish rather than prioritising into a finished torrent.
-                # Every counted fetch decrements in a finally, so this always drains --
-                # though it can take as long as the other fetch's flush and metadata
-                # waits plus any wait behind the global flush lock.
-                with _idle_cv:
-                    while _active.get(repo_id):
-                        _idle_cv.wait(5)
-                if h.status().state == lt.torrent_status.finished:  # still: no other fetch revived it meanwhile
-                    resume = _resume_data(h)
-                    with _lock:
-                        with contextlib.suppress(Exception):
-                            _get_session().remove_torrent(h)
-                        _handles.pop(repo_id, None)
-                    h = _handle(repo_id, resume, magnet=magnet)
-                    if h is None:
-                        raise Unavailable()
+            h = _revive_if_finished(repo_id, h, magnet)
 
             ti = h.torrent_file()
             i = _file_index(ti, filename)
             if i is None:
                 raise NotInTorrent("not in the torrent")
-            size = ti.files().file_size(i)
-            path = Path(h.status().save_path) / ti.files().file_path(i)
+            fs = ti.files()
+            size = fs.file_size(i)
+            path = Path(h.status().save_path) / fs.file_path(i)
             # Set all priorities in one call (all-skipped for a moment drops the web seed), from our own set:
             # libtorrent applies them lazily, so reading them back across threads loses updates.
             # Keep accumulating wanted files: from_pretrained fetches several files in parallel.
@@ -446,30 +459,16 @@ def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=Non
                 _active[repo_id] = _active.get(repo_id, 0) + 1
                 counted = True
 
-        # A stall is no bytes arriving, not no piece finishing: one large piece from a slow but live swarm can
-        # take longer than the timeout.
-        last_received, last_change = -1, time.monotonic()
-        while True:
-            done = h.file_progress(lt.torrent_handle.piece_granularity)[i]
-            if done >= size:
-                break
-            st = h.status()
-            if st.errc.value():
-                raise RuntimeError(f"torrent error: {st.errc.message()}")
-            if st.total_payload_download != last_received:
-                last_received, last_change = st.total_payload_download, time.monotonic()
-            elif time.monotonic() - last_change > stall_timeout:
-                raise TimeoutError(f"stalled for {stall_timeout:.0f}s")
-            time.sleep(0.25)
+        _wait_for_download(h, i, size, stall_timeout)
         _flush_to_disk(h)
         return path
     except BaseException:
         # A failed fetch must not leave its file wanted forever: at priority 4 the
         # torrent never reaches "finished" again, which would disable the re-add path.
-        if counted:  # set only once h, ti and i exist
+        if counted:  # set only once h, ti and i exist, and _wanted[repo_id] exists
             with _idle_cv:
-                wanted = _wanted.get(repo_id)
-                if wanted is not None and i in wanted and _active.get(repo_id, 0) <= 1:
+                wanted = _wanted[repo_id]
+                if i in wanted and _active.get(repo_id, 0) <= 1:
                     wanted.discard(i)
                     with contextlib.suppress(Exception):
                         h.prioritize_pieces(_pieces_for(ti, wanted))

@@ -31,10 +31,9 @@ def listing(repo_id):
     read; None if neither has it."""
     try:
         return api.listed(repo_id)
-    except api.Unreachable:
-        return mirror.listing(repo_id)
-    except api.Unreadable:
-        report_unreadable(repo_id, "trying the cached index")
+    except (api.Unreachable, api.Unreadable) as e:
+        if isinstance(e, api.Unreadable):
+            report_unreadable(repo_id, "trying the cached index")
         return mirror.listing(repo_id)
 
 

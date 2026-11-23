@@ -172,16 +172,11 @@ def request_body(repo, revision, lic, evidence, sums, data, v1, v2, readme, web_
         "manifest": [{"path": p, "sha256": h} for p, h in sorted(sums.items())],
         "torrent": base64.b64encode(data).decode(),  # lets the magnet work with no peer online
         "submissionTermsVersion": TERMS_VERSION,
-        **dict.fromkeys(
-            [
-                "redistributionConfirmed",
-                "accuracyConfirmed",
-                "reviewAcknowledged",
-                "privacyAcknowledged",
-                "termsAccepted",
-            ],
-            True,
-        ),
+        "redistributionConfirmed": True,
+        "accuracyConfirmed": True,
+        "reviewAcknowledged": True,
+        "privacyAcknowledged": True,
+        "termsAccepted": True,
     }
     # README.md is the model card. Pirate Face shows it for models that aren't on Hugging Face.
     if readme.is_file() and readme.stat().st_size <= 200_000:
@@ -255,7 +250,7 @@ def submit_new(
     # The shared-seeds default keeps each author in their own author--model folder (seed/package.py:seeds_folder
     # applies the same name; seed_listed reuses an old <model> folder that already holds the torrent). An
     # explicit out is used as given; pf submit's own ./pirateface-NAME default is one.
-    out = Path(out or Path(SEEDS, repo.replace("/", "--")))
+    out = out or Path(SEEDS, repo.replace("/", "--"))
     save_dir = out / "files"
     answers = Answers(dry_run)
     # The torrent carries this account's seeding tracker. Trackers are outside the info dict,

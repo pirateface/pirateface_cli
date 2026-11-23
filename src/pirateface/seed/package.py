@@ -105,14 +105,15 @@ def stage(src, dest):
         for n in names:
             rel = Path(d, n).relative_to(src).as_posix()
             (skipped if SKIP.search(rel) else included).append(rel)
-    problems = unportable(sorted(included))
+    included.sort()
+    problems = unportable(included)
     if problems:
         raise LinkError("rename or remove these files first:\n    " + "\n    ".join(problems[:20]))
     if Path(src).resolve() != Path(dest).resolve():
         # src is dest: the files are already where the torrent is built from; linking would be self-links.
-        for rel in sorted(included):
+        for rel in included:
             link(Path(src, rel).absolute(), dest / rel)
-    return sorted(included), sorted(skipped)
+    return included, sorted(skipped)
 
 
 def link_existing(src, dest, paths):

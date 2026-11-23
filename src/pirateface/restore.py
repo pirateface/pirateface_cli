@@ -2,7 +2,6 @@
 
 import http.client
 import sys
-import urllib.error
 from pathlib import Path
 
 from pirateface.client import api
@@ -50,7 +49,7 @@ def run(args):
             continue
         try:
             status, body = api.restore(key, data)
-        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+        except (OSError, http.client.HTTPException) as e:
             sys.exit(f"error: could not reach {API} ({getattr(e, 'reason', e)}); nothing more was sent")
         if status == 200:
             print(f"restored: {path.name} -> {body.get('repoId', '')} ({body.get('infohash', '')})")

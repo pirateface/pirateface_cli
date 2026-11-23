@@ -4,11 +4,6 @@ The index is a torrent of weekly shards (``shards/YYYY-MM-DD.txt``, one bare mag
 the first build that drops something, ``shards/removed-YYYY-MM-DD.txt`` with one v1 infohash per line.
 pf mirrors those shards into PF_CACHE/index/shards/ and answers lookups from that copy when pirateface.co
 cannot be reached, so a model can still be downloaded instead of falling back to Hugging Face.
-
-A file fetched through this copy is checked by the hook against the Hugging Face fingerprint the download
-already holds -- that is what ties the bytes to a repo and a revision. libtorrent hashes every piece before
-it counts it downloaded, and the fingerprint is compared in full before the download replaces the cached
-file; without a fingerprint the file is left to Hugging Face.
 """
 
 import base64
@@ -56,33 +51,33 @@ _sync_lock = threading.Lock()
 
 @dataclass(frozen=True)
 class Entry:
-    """What the index says about one repo: the magnet the swarm is joined with, and where it came from."""
-
     magnet: str
     infohash: str
     build: str  # the shard date this magnet was last written in
     commit: str | None  # from the web seed's path, when it names a full commit
 
 
-def web_seed(magnet):
-    """(repo id, commit or None) from a magnet's web seed (ws=https://pirateface.co/api/ws/OWNER/NAME/REV/), or None.
-
-    The shards hold bare magnets with no repo name on them: the web seed's path is the only place the
-    model id appears, so a magnet without one cannot be looked up and is skipped.
-
-    A shard therefore decides which swarm a repo id resolves to, and the web seed in that magnet is one
-    libtorrent may fetch pieces from. So the host must be the site's own (or the configured mirror's) and
-    the name must be a plain owner/name: a shard cannot point a lookup at another server, at `..`, or at a
-    truncated path.
-    """
+def _query(magnet):
+    """The magnet's parsed query dict, or None when the line cannot be parsed."""
     try:
-        ws = urllib.parse.parse_qs(urllib.parse.urlparse(magnet).query).get("ws") or []
-        url = urllib.parse.urlparse(ws[0]) if ws else None
+        return urllib.parse.parse_qs(urllib.parse.urlparse(magnet).query)
+    except ValueError:
+        return None
+
+
+def _web_seed_from(query):
+    ws = query.get("ws") or []
+    if len(ws) != 1:
+        return None  # libtorrent honours every ws= in a magnet; a second one would be an unchecked server
+    try:
+        url = urllib.parse.urlparse(ws[0])
     except ValueError:
         return None  # a line urllib cannot parse (an unmatched "[" in the host, say) is skipped like any other
-    if url is None or len(ws) > 1:
-        return None  # libtorrent honours every ws= in a magnet; a second one would be an unchecked server
-    if url.scheme not in ("http", "https") or url.hostname not in _ws_hosts():
+    try:
+        hosts = WS_HOSTS | {urllib.parse.urlsplit(config.API).hostname or ""}
+    except ValueError:
+        hosts = WS_HOSTS  # a malformed PF_API must not take the index down with it
+    if url.scheme not in ("http", "https") or url.hostname not in hosts:
         return None
     parts = [part for part in url.path.split("/") if part]
     if len(parts) < 4 or parts[0] != "api" or parts[1] != "ws":
@@ -92,21 +87,16 @@ def web_seed(magnet):
     return (repo, commit) if _REPO.fullmatch(repo) else None
 
 
-def _ws_hosts():
-    """pirateface.co, plus the host of PF_API so a self-hosted mirror's shards still map."""
-    try:
-        return WS_HOSTS | {urllib.parse.urlsplit(config.API).hostname or ""}
-    except ValueError:
-        return WS_HOSTS  # a malformed PF_API must not take the index down with it
-
-
 def infohash_of(magnet):
     """The magnet's v1 infohash as lowercase hex (btih is hex or base32), or None."""
-    try:
-        xts = urllib.parse.parse_qs(urllib.parse.urlparse(magnet).query).get("xt", ())
-    except ValueError:
-        return None  # an unparseable line is skipped, not allowed to take the whole index down
-    for xt in xts:
+    query = _query(magnet)
+    if query is None:
+        return None
+    return _infohash_from(query)
+
+
+def _infohash_from(query):
+    for xt in query.get("xt", ()):
         digest = xt.removeprefix("urn:btih:")
         if digest == xt:
             continue
@@ -146,36 +136,35 @@ def build():
 
 @functools.cache
 def _parsed():
-    """({repo_id: Entry}, removals_lost): every build in date order, each date's removals applied right
-    after that shard.
+    """Every build in date order, each date's removals applied right after that shard.
 
-    A removal names an infohash, not a repo: it retires that torrent. A repo the site drops and later
-    publishes again under a new infohash stays listed, which is what the 2026-11-16 build does with all
-    224 hashes the 2026-11-09 build listed -- they are repacks, not models that must disappear.
-
-    Order matters. A removal deletes what is known at that date, so a model dropped in one build and
-    added back in a later one stays listed; applying every removal at the end would delete the re-add.
-    Within one shard the last line wins, which is what the index page documents for a re-upload.
+    A removal names an infohash, not a repo: it retires that torrent. Order matters: a removal deletes
+    what is known at that date, so a model dropped and re-added later stays listed; applying every
+    removal at the end would delete the re-add. Within one shard the last line wins, which is what the
+    index page documents for a re-upload.
 
     A removals list is never traded away for anything. If one cannot be read, this copy of the index
     cannot say what is still allowed and answers nothing at all, so the files come from Hugging Face
     until a sync replaces the file -- the alternative is resurrecting a model the site removed. A shard
     that cannot be read only costs that build's additions, which is the safe direction, and its removals
-    still apply. The two come back together so a reader can never see one without the other.
+    still apply.
     """
     found = {}
     for date in dates():
         gone = _removed_hashes(SHARDS / f"removed-{date}.txt")
         if gone is None:
             return {}, True
-        for line in _lines(SHARDS / f"{date}.txt") or []:
-            magnet = line.strip()
-            seed = web_seed(magnet) if magnet else None
-            infohash = infohash_of(magnet) if seed else None
+        for magnet in (line.strip() for line in _lines(SHARDS / f"{date}.txt") or []):
+            query = _query(magnet) if magnet else None
+            if query is None:
+                continue
+            seed = _web_seed_from(query)
+            infohash = _infohash_from(query) if seed else None
             if seed and infohash:
                 found[seed[0]] = Entry(magnet, infohash, date, seed[1])
-        for repo_id in [repo for repo, entry in found.items() if entry.infohash in gone]:
-            del found[repo_id]
+        for repo_id, entry in list(found.items()):
+            if entry.infohash in gone:
+                del found[repo_id]
     return found, False
 
 
@@ -241,11 +230,10 @@ def resolve(repo_id):
 
 
 def listing(repo_id):
-    """The repo as the cached index names it, in api.listed()'s shape, or None: the commit is the one in the
-    magnet's web seed (.../api/ws/OWNER/NAME/COMMIT/), the file list comes from the swarm.
+    """The repo as the cached index names it, in api.listed()'s shape, or None.
 
-    There is no sha256 per file (None): the magnet's infohash commits to every piece, and libtorrent counts a
-    piece downloaded only once its hash matches, so the torrent's own hashes are the check.
+    No sha256 per file (None): the magnet's infohash commits to every piece, and libtorrent counts a piece
+    downloaded only once its hash matches, so the torrent's own hashes are the check.
     """
     entry = resolve(repo_id)
     if entry is None or entry.commit is None:
@@ -292,11 +280,10 @@ def _digest(path):
 def _unchanged(path, size, recorded):
     """Whether the cached file is the copy this build names.
 
-    The size alone misses a file rewritten at the same size, so a sync records each file's sha256 and
-    compares that too. A copy mirrored before digests existed has none recorded: it is judged by size and
-    has a digest recorded on the next sync, so a rewrite at that size is caught from then on. A file that
-    cannot be read is never the copy this build names -- otherwise `pf index` tells the user to run a sync
-    that would keep the very file it is complaining about.
+    The size alone misses a rewrite at the same size, so a sync records each file's sha256 and compares it
+    too. A copy mirrored before digests existed is judged by size and gains a recorded digest on the next
+    sync. A file that cannot be read is never the copy this build names: otherwise `pf index` tells the
+    user to run a sync that would keep the very file it is complaining about.
     """
     try:
         if not path.is_file() or path.stat().st_size != size:
@@ -336,17 +323,11 @@ def _remote_magnet():
 def sync():
     """Mirror the index torrent's shards into PF_CACHE/index/shards/ and return the build date.
 
-    Needs no API: the bootstrap magnet carries its own trackers. The shards are copied out of the
-    torrent's folder because torrent._cleanup deletes that folder at exit.
-
-    Each date's removals file is fetched before that date's shard, so a mirror that dies halfway leaves
-    every shard it did write next to its removals. The other order would leave the models a build dropped
-    listed -- and downloadable -- until someone noticed.
-
-    A cached file is replaced when it is not the copy this build names -- wrong size, or (once a digest
-    has been recorded) different bytes at the same size -- not merely when it is missing. That is how a
-    copy that was truncated, corrupted or left unreadable gets healed, which is what `pf index` tells the
-    user to do about it. The temp file carries the pid, so two processes syncing at once cannot share one.
+    Removals sort before their shard so a half-finished mirror leaves every shard next to its removals,
+    not the models a build dropped listed -- and downloadable -- until someone noticed. A cached copy is
+    replaced when it is not the copy this build names: missing, wrong in size, or (once a digest is
+    recorded) different bytes at that size. The temp file carries the pid, so two processes syncing at
+    once cannot share one.
     """
     with _sync_lock:
         magnet = _remote_magnet()
@@ -355,24 +336,24 @@ def sync():
             if not FILE.fullmatch(path):  # LICENSE and anything else a build carries are not lookups
                 continue
             name = Path(path).name
-            removed, shard = _REMOVED.match(name), _SHARD.match(name)
-            if removed:
-                files.append((removed[1], 0, path, size))  # removals first, for that date
-            elif shard:
-                files.append((shard[1], 1, path, size))
+            if match := _REMOVED.match(name):
+                files.append((match[1], 0, path, size))  # removals first, for that date
+            elif match := _SHARD.match(name):
+                files.append((match[1], 1, path, size))
         SHARDS.mkdir(parents=True, exist_ok=True)
         digests = dict(state().get("digests") or {})
         try:
-            for _, _, name, size in sorted(files):
-                dest = SHARDS / Path(name).name
-                if _unchanged(dest, size, digests.get(dest.name)):
+            for _, _, path, size in sorted(files):
+                dest = SHARDS / Path(path).name
+                name = dest.name
+                if _unchanged(dest, size, digests.get(name)):
                     # Judged by size alone: record a digest now, so a rewrite at that size is caught instead
                     # of kept for the life of the copy. Guarded rather than setdefault, which would hash the
                     # file again on every sync.
-                    if dest.name not in digests:
-                        digests[dest.name] = _digest(dest)
+                    if name not in digests:
+                        digests[name] = _digest(dest)
                     continue
-                src = torrent.fetch_file(INDEX_REPO, name, magnet=magnet)
+                src = torrent.fetch_file(INDEX_REPO, path, magnet=magnet)
                 tmp = dest.with_name(f"{dest.name}.{os.getpid()}.part")
                 try:
                     shutil.copyfile(src, tmp)
@@ -380,7 +361,7 @@ def sync():
                 except BaseException:
                     tmp.unlink(missing_ok=True)
                     raise
-                digests[dest.name] = _digest(dest)
+                digests[name] = _digest(dest)
         finally:
             # However far it got, what resolve() reads must be what is on disk now.
             _parsed.cache_clear()

@@ -25,11 +25,6 @@ def _qbittorrent():
     return qbt
 
 
-def _remove(qbt, entry):
-    """Take a torrent out of qBittorrent and leave its files on disk."""
-    qbt.call("torrents/delete", {"hashes": entry["hash"], "deleteFiles": "false"})
-
-
 def listed_v1(repo, infohash=None):
     """(.torrent bytes, name, v1 infohash) of the repo's listed v1-only torrent (or the one with that infohash, which
     the site redirects to its hybrid once upgraded), or None if it is already hybrid."""
@@ -102,7 +97,7 @@ def upgrade_one(qbt, key, repo, infohash=None, report=True):
     print(f"    Listed in place of the v1 torrent: {API}/{repo}")
     if not qbt.has(new_v1):  # a rerun after the site took it
         qbt.add(data, entry["save_path"], skip_checking=True)  # every byte was just hashed
-    _remove(qbt, entry)
+    qbt.remove(entry["hash"])
     print(f"    Seeding the hybrid ({new_v1}) from the same files; the v1 torrent is out of qBittorrent.")
     print("    Seeders of the old torrent get told to switch: pf seed --upgrade")
     return seed_model(data, entry["save_path"], new_v1, verified=True, label=repo, report=report)
@@ -160,7 +155,7 @@ def switch(qbt, t, status, trackers):
             print(f"    Skipped {t['name']}: get its replacement at {API}/{status.get('repo')}")
             return False
         qbt.add(package.with_trackers(data, trackers), t["save_path"])
-    _remove(qbt, t)
+    qbt.remove(t["hash"])
     return True
 
 

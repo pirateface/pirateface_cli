@@ -40,8 +40,12 @@ def matching_quant(repo, src):
     A revision can have one torrent per quant (say UD-Q8_K_XL and UD-IQ4_XS)."""
     entry = api.lookup_soft(repo)  # an outage becomes None; the .torrent fetch reports it
     quants = (entry.get("quants") or []) if isinstance(entry, dict) else []
-    best = max(quants, key=lambda q: len(weights(src, [f["path"] for f in q["files"]])), default=None)
-    return best["quant"] if len(quants) > 1 and weights(src, [f["path"] for f in best["files"]]) else None
+    best = max(
+        ((q, len(weights(src, [f["path"] for f in q["files"]]))) for q in quants),
+        key=lambda t: t[1],
+        default=(None, 0),
+    )
+    return best[0]["quant"] if best[0] and len(quants) > 1 and best[1] else None
 
 
 def seed_listed(repo, src, key, per_file=False):

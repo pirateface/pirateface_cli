@@ -178,11 +178,9 @@ class QBittorrent:
         """Add magnet links with qBittorrent's default save path. qBittorrent fetches each one's metadata from
         the swarm, then downloads and seeds it; trackers named in each magnet's `tr` are announced to."""
         b = uuid.uuid4().hex
-        fields = [
-            f'--{b}\r\nContent-Disposition: form-data; name="urls"\r\n\r\n{"\r\n".join(urls)}\r\n',
-            f"--{b}--\r\n",
-        ]
-        body = "".join(fields).encode()
+        body = (
+            f'--{b}\r\nContent-Disposition: form-data; name="urls"\r\n\r\n{"\r\n".join(urls)}\r\n--{b}--\r\n'
+        ).encode()
         answer = self.call("torrents/add", body=body, content_type=f"multipart/form-data; boundary={b}").strip()
         if answer == "Fails.":
             raise RuntimeError("qBittorrent did not take the magnets")

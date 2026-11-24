@@ -2,11 +2,14 @@
 
 import sys
 import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any
 
 from pirateface import ui
 from pirateface.client import api
-from pirateface.config import API, MAX_UPLOAD_BYTES
-from pirateface.seed import proofs, user
+from pirateface.config import API, MAX_UPLOAD_BYTES, flag
+from pirateface.seed import hybrid, proofs, user
 from pirateface.work import build, site, state
 from pirateface.work.errors import LeaseLost, Oversize, WorkError, WorkUnreachable
 
@@ -14,12 +17,53 @@ WORK_BACKOFF_MIN = 30  # the first pause after a failed lease poll or a failed j
 WORK_BACKOFF_MAX = 300  # cap: the site keeps a lease for 10 minutes, so a 5-minute pause is safe
 
 
+@dataclass(frozen=True)
+class Backoff:
+    """The pause both failure arms share. A site answer resets it; a failure doubles it up to the cap."""
+
+    seconds: int = WORK_BACKOFF_MIN
+
+    def reset(self) -> "Backoff":
+        return Backoff(WORK_BACKOFF_MIN)
+
+    def escalate(self) -> "Backoff":
+        return Backoff(min(self.seconds * 2, WORK_BACKOFF_MAX))
+
+
+@dataclass(frozen=True)
+class LoopState:
+    """Everything the loop carries between iterations."""
+
+    pending: dict[str, Any] | None = None  # saved checkpoint to resume, or None to ask for a new job
+    backoff: Backoff = field(default_factory=Backoff)
+
+
+class NextAction(Enum):
+    """What the loop does after a poll."""
+
+    RETRY = auto()  # go back to the top of the loop
+    EXIT = auto()  # return the exit code carried by the outcome
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Typed verdict of one iteration of the loop; fields are only meaningful for the action shown."""
+
+    action: NextAction
+    state: LoopState
+    message: str | None = None  # line to print before acting
+    exit_code: int | None = None  # exit code when action is EXIT
+    sleep: float | None = None  # seconds to sleep before acting
+    stderr: bool = False  # True prints the message to stderr
+
+
 def _consent():
     print(f"""
 ==> pf work: you build the torrent for one queued model at a time. Its files are streamed from
-    Hugging Face through memory; no model bytes are written to disk. A private checkpoint keeps the
-    lease and the hashes of each finished file (16 KiB block hashes included) until the job ends, so an
-    interrupted run resumes at the file it was reading. The torrent is listed on Pirate Face under your
+    Hugging Face through memory; no model bytes are written to disk. Their hashes and progress are saved
+    in a private checkpoint so an interrupted run can resume. If resumable hashing is unavailable, progress
+    is saved at file boundaries instead of piece boundaries. Checkpoints have no size limit.
+    Block proofs may also use a temporary file. The torrent is listed on Pirate Face under your
     account. Verified work earns points: see {API}/how-it-works.
     Terms: {API}/terms#model-torrent-submissions""")
     if not user.YES and user.ask("    Type yes to start: ") != "yes":
@@ -55,10 +99,14 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         ]
     )
     state.save(job, name)
-    # A failed build raises after giving the lease back, so the next lease call takes a job at once.
+    old_piece_checkpoint = state._path(name).with_suffix(".progress.sqlite")
+    if old_piece_checkpoint.exists():
+        print(f"    Older SQLite progress is not used by this version and was kept at {old_piece_checkpoint}.")
     try:
+        plen = hybrid.piece_length(total)
+        saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
         with proofs.sidecar(state.blocks_path(name)) as blocks:
-            data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate)
+            data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=saved)
             if len(data) > MAX_UPLOAD_BYTES:
                 raise user.SeedError("the .torrent is over the 3 MB upload limit")
             block_proofs = proofs.answer(key, data, blocks)
@@ -68,6 +116,8 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         state.clear(name, files=not isinstance(e, LeaseLost))
         site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
         raise
+    except (OSError, ValueError, RuntimeError) as e:
+        raise user.SeedError(f"could not use progress checkpoint: {e}. Saved lease and progress were kept") from e
     status, answer = site.complete(key, job["leaseId"], data, manifest, block_proofs)
     if site.transient(status):
         raise WorkUnreachable(
@@ -82,7 +132,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         and not answer.get("error")
         and answer.get("status") in ("approved", "already_listed", "pending")
     ):
-        state.clear(name)
+        state.clear(name, files=True)
         # already_listed: the same files are listed under another infohash, which the site returns.
         if answer.get("status") == "already_listed":
             print(f"    Already listed: {API}/{job['repoId']} ({answer.get('infohash', '')})")
@@ -93,7 +143,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         # The site answered 200 but not with a listing: keep the checkpoint and treat the job as refused.
         print(f"    Not listed (unexpected 200 body): {answer!r}")
         return False
-    state.clear(name)
+    state.clear(name, files=True)
     print(f"    Not listed ({status}): {(answer or {}).get('error', 'request failed')}")
     return False
 
@@ -131,7 +181,7 @@ def _resume_once(key, trackers, name, saved, max_bytes=None, max_download_rate=N
     try:
         _job_size(saved["job"], max_bytes)
     except Oversize:
-        state.clear(name, files=False)
+        state.clear(name)
         raise
     status, answer = site.renew(key, saved["leaseId"])
     if status in {401, 403, 404, 410}:
@@ -154,6 +204,15 @@ def run(args):
         _consent()
     except user.SeedError as e:
         sys.exit(f"error: {e}")
+    if args.clear_progress:
+        checkpoint_path = state._path(args.name).with_suffix(".progress.sqlite")
+        try:
+            checkpoint_path.unlink(missing_ok=True)
+            checkpoint_path.with_name(checkpoint_path.name + "-journal").unlink(missing_ok=True)
+            state.clear_files(args.name)
+        except OSError as e:
+            sys.exit(f"error: could not remove progress checkpoint {checkpoint_path}: {e}")
+        print("Discarded saved progress hashes for this worker; the saved lease was not changed.")
     trackers = api.trackers(key)
     max_bytes = None if args.max_size is None else args.max_size * 1024**3
     max_download_rate = None if args.max_download_rate is None else args.max_download_rate * 1_000_000
@@ -165,71 +224,94 @@ def run(args):
         sys.exit(f"error: worker {label} already has an active checkpoint lock; stop it or choose another --name")
 
 
+def _step(args, loop, key, trackers, max_bytes, max_download_rate):
+    """Run one poll and turn its result into the next typed verdict. Exits via sys.exit on the failure paths
+    exactly as the loop always has; the loop owns the sleep and the print."""
+    backoff = loop.backoff
+    try:
+        if loop.pending:
+            listed = _resume_once(key, trackers, args.name, loop.pending, max_bytes, max_download_rate)
+            if listed is None:
+                # The site answered, so the site is not unreachable: this saved lease cannot be kept
+                # (expired, refused, or not renewable). Reset the pause before asking for the next job.
+                return Outcome(NextAction.RETRY, LoopState(None, backoff.reset()))
+            loop = LoopState(None, backoff)
+        else:
+            listed = _work_once(key, trackers, args.name, max_bytes, max_download_rate)
+    except (WorkUnreachable, Oversize) as e:
+        try:
+            pending = state.load(args.name)
+        except OSError as state_error:
+            sys.exit(f"error: {state_error}")
+        if args.once:
+            sys.exit(f"error: {e}")
+        # None is a failed job: the site is down or busy, this lane still holds a lease, or the site offered
+        # a row this run won't take. Pause and ask again, doubling up to the cap.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(pending, backoff.escalate()),
+            message=f"error: {e}. Checking again in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    except WorkError as e:
+        if args.once:
+            sys.exit(f"error: {e}")
+        # The lease is cleared and given back on a best-effort release, so the site may offer the same
+        # row again at once. Pause before asking, the way the Oversize arm above already does: retrying
+        # at once only spins. Both arms share `backoff`, so failures of either kind escalate together.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.escalate()),
+            message=f"error: {e}. Taking the next job in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    except user.SeedError as e:
+        sys.exit(
+            f"error: {e}. The lease lapses after 10 minutes without renewal; the request then returns to the queue."
+        )
+    if listed is None:
+        if args.once:
+            return Outcome(
+                NextAction.EXIT, LoopState(None, backoff.reset()), message="No work is queued right now.", exit_code=0
+            )
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.reset()),
+            message=f"Nothing queued. Checking again in {args.idle} s.",
+            sleep=args.idle,
+        )
+    if listed is False:
+        if args.once:
+            return Outcome(NextAction.EXIT, LoopState(None, backoff.reset()), exit_code=1)
+        # A clean run that did not list the job (a refused complete, an expired saved lease): the site
+        # answered, so the pause resets only on a listed job. Pause before asking for the next job.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.escalate()),
+            message=f"Job not listed. Taking the next job in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    # A listed job answered the site: the pause resets.
+    if args.once:
+        return Outcome(NextAction.EXIT, LoopState(None, backoff.reset()), exit_code=0)
+    return Outcome(NextAction.RETRY, LoopState(None, backoff.reset()))
+
+
 def _run_locked(args, key, trackers, max_bytes, max_download_rate):
     try:
         pending = state.load(args.name)
     except OSError as e:
         sys.exit(f"error: {e}")
-    backoff = WORK_BACKOFF_MIN
+    loop = LoopState(pending=pending)
     while True:
-        try:
-            if pending:
-                listed = _resume_once(key, trackers, args.name, pending, max_bytes, max_download_rate)
-                if listed is None:
-                    # The site answered, so the site is not unreachable: this saved lease cannot be kept
-                    # (expired, refused, or not renewable). Reset the pause before asking for the next job.
-                    backoff = WORK_BACKOFF_MIN
-                    pending = None
-                    continue
-                pending = None
-            else:
-                listed = _work_once(key, trackers, args.name, max_bytes, max_download_rate)
-        except (WorkUnreachable, Oversize) as e:
-            try:
-                pending = state.load(args.name)
-            except OSError as state_error:
-                sys.exit(f"error: {state_error}")
-            if args.once:
-                sys.exit(f"error: {e}")
-            # None is a failed job: the site is down or busy, this lane still holds a lease, or the site offered
-            # a row this run won't take. Pause and ask again, doubling up to the cap.
-            print(f"error: {e}. Checking again in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        except WorkError as e:
-            pending = None
-            if args.once:
-                sys.exit(f"error: {e}")
-            # The lease is cleared and given back on a best-effort release, so the site may offer the same
-            # row again at once. Pause before asking, the way the Oversize arm above already does: retrying
-            # at once only spins. Both arms share `backoff`, so failures of either kind escalate together.
-            print(f"error: {e}. Taking the next job in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        except user.SeedError as e:
-            sys.exit(
-                f"error: {e}. The lease lapses after 10 minutes without renewal; the request then returns to the queue."
-            )
-        if listed is None:
-            if args.once:
-                print("No work is queued right now.")
-                return 0
-            print(f"Nothing queued. Checking again in {args.idle} s.")
-            backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
-            time.sleep(args.idle)
-            continue
-        if listed is False:
-            if args.once:
-                return 1
-            # A clean run that did not list the job (a refused complete, an expired saved lease): the site
-            # answered, so the pause resets only on a listed job. Pause before asking for the next job.
-            print(f"Job not listed. Taking the next job in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
-        if args.once:
-            return 0
-        continue
+        outcome = _step(args, loop, key, trackers, max_bytes, max_download_rate)
+        if outcome.message:
+            print(outcome.message, file=sys.stderr if outcome.stderr else None)
+        if outcome.sleep is not None:
+            time.sleep(outcome.sleep)
+        if outcome.action is NextAction.EXIT:
+            return outcome.exit_code
+        loop = outcome.state

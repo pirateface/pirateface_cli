@@ -23,6 +23,10 @@ pf restore PATH            # upload .torrent files to fix a listing whose magnet
 pf index [--sync]          # the cached magnet index: what it holds, and mirror the newest build
 ```
 
+`pf work` builds torrents for queued model requests, streamed from Hugging Face into memory; no model bytes are saved to disk. Progress is saved in a private checkpoint (completed pieces plus the unfinished piece's SHA-256 state, or file boundaries when the native hasher is unavailable) and an interrupted run resumes it on the next run while the lease is still active; a new lease for the same model revision and files can also reuse it. Completed file checkpoints are retained when the native hasher is unavailable. `pf work --clear-progress` discards the saved hashes (keeping the lease), and `--name` keeps concurrent workers' checkpoints apart.
+
+Run `pf <command> --help` for every flag.
+
 ## When Pirate Face is down
 
 The site's magnet index lists every model's magnet as a weekly torrent, mirrored into `$PF_CACHE/index/shards/`. When Pirate Face cannot be reached, a listed model in that copy still downloads: checked against the Hugging Face fingerprint first, and when Hugging Face cannot answer, against the torrent's own piece hashes via the infohash the shard commits to. A model not listed, a torrent that carries only some files, an unreadable removals list, or a download with no fingerprint falls back to Hugging Face, with the reason printed.

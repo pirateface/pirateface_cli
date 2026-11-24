@@ -11,10 +11,11 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from importlib.metadata import version
 
+from pirateface._http import NO_REDIRECTS
+from pirateface._http import open as _http_open
 from pirateface._http import request as _http_request
 from pirateface.config import API, flag
 
@@ -76,20 +77,12 @@ def _mark_down():
     _down_until = time.monotonic() + UNREACHABLE_FOR
 
 
-class _NoRedirects(urllib.request.HTTPRedirectHandler):
-    """Never follow a redirect: an answer means one request against the host it named. Returning None is what
-    hands the 3xx back to the caller, so a credential on a request is not carried to another host."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-_opener = urllib.request.build_opener(_NoRedirects())
-
-
 def request(url, timeout, *, method=None, headers=None, data=None):
-    """One way to talk to the site: every request carries `User-Agent: pirateface/<version>`."""
-    return _opener.open(_http_request(url, headers=headers, data=data, method=method), timeout=timeout)
+    """One way to talk to the site: every request carries `User-Agent: pirateface/<version>`, and no
+    redirect is ever followed (a credential is never carried to another host)."""
+    return _http_open(
+        _http_request(url, headers=headers, data=data, method=method), timeout=timeout, policy=NO_REDIRECTS
+    )
 
 
 def _site_answer(fetch):

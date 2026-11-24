@@ -2,14 +2,50 @@
 
 import threading
 import time
+from dataclasses import dataclass
 
 from pirateface import ui
 from pirateface.seed import hybrid
 from pirateface.work import site, source, state
 from pirateface.work.errors import LeaseLost, WorkError
+from pirateface.work.resumable_hash import ResumableSHA256
 
 RENEW_SECONDS = 10  # the rescue board reads this; the site drops a lease after 10 minutes without one
 RENEW_UNREACHABLE_SECONDS = 300  # half the lease lapse: beyond this a lost lease can't be renewed
+
+
+@dataclass(frozen=True)
+class LeaseRunning:
+    """The renewal thread is alive: the lease is held, and renewals are being attempted."""
+
+
+@dataclass(frozen=True)
+class LeaseFailed:
+    """The renewal thread caught a WorkError and exited; the next note() re-raises it."""
+
+    error: WorkError
+
+
+LeaseSnapshot = LeaseRunning | LeaseFailed
+
+
+@dataclass(frozen=True)
+class GraceWindow:
+    """The RENEW_UNREACHABLE_SECONDS grace window around an unanswered renewal. Opens on the first
+    unanswered answer, is not moved by later ones, and closes on a 200."""
+
+    since: float | None = None
+
+    def unanswered(self, now: float) -> "GraceWindow":
+        if self.since is None:
+            return GraceWindow(now)
+        return self
+
+    def expired(self, now: float) -> bool:
+        return self.since is not None and now - self.since > RENEW_UNREACHABLE_SECONDS
+
+    def reset(self) -> "GraceWindow":
+        return GraceWindow()
 
 
 class Lease:
@@ -20,17 +56,21 @@ class Lease:
 
     def __init__(self, key, lease_id, total, name=None):
         self.key, self.id, self.total, self.done, self.name = key, lease_id, total, 0, name
-        self._error = None
-        self._down_since = None
+        self._snapshot = LeaseRunning()
+        self._grace = GraceWindow()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._renew_loop, daemon=True)
+
+    @property
+    def state(self) -> LeaseSnapshot:
+        return self._snapshot
 
     def _renew_loop(self):
         while not self._stop.wait(RENEW_SECONDS):
             try:
                 self.renew(strict=False)
             except WorkError as e:
-                self._error = e
+                self._snapshot = LeaseFailed(e)
                 return
 
     def renew(self, strict=True):
@@ -40,14 +80,13 @@ class Lease:
         site never confirmed; the timer, which asks non-strictly, also rides anything site.transient counts."""
         status, body = site.renew(self.key, self.id, self.done, self.total, self.name)
         if status == 200:
-            self._down_since = None
+            self._grace = self._grace.reset()
             return
         # status 0 first, for both paths: a network error is not a lost lease and never was. `not strict`
         # then adds the answers only the timer may tolerate, so a direct call keeps its old contract.
         if status == 0 or (not strict and site.transient(status)):
-            if self._down_since is None:
-                self._down_since = time.monotonic()
-            if time.monotonic() - self._down_since > RENEW_UNREACHABLE_SECONDS:
+            self._grace = self._grace.unanswered(time.monotonic())
+            if self._grace.expired(time.monotonic()):
                 minutes = RENEW_UNREACHABLE_SECONDS // 60
                 if status == 0:
                     raise LeaseLost(f"the site has been unreachable for {minutes} minutes")
@@ -57,8 +96,8 @@ class Lease:
 
     def note(self, n):
         self.done += n
-        if self._error is not None:
-            raise self._error
+        if isinstance(self._snapshot, LeaseFailed):
+            raise self._snapshot.error
 
     def start(self):
         self._thread.start()
@@ -68,52 +107,102 @@ class Lease:
         self._thread.join(timeout=2)
 
 
-def build(job, key, trackers, name=None, blocks=None, max_download_rate=None):
-    """Stream every file of the job, build the hybrid torrent. Returns (.torrent bytes, manifest, v1 infohash).
-    blocks: a proofs.BlockHashes to keep the block hashes in, or None. Files an earlier run of this job finished
-    are taken from the lane's checkpoint instead of Hugging Face, and each file finished now is added to it."""
+def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *, saved=None):
+    """Stream a job with piece checkpoints or file-boundary checkpoints."""
     repo, revision = job["repoId"], job["revision"]
     files = sorted(job["files"], key=lambda f: hybrid.torrent_order(f["path"].split("/")))
     total = sum(f["size"] for f in files)
-    plen, proofs = hybrid.piece_length(total), blocks is not None
-    done = state.load_files(job, plen, proofs, name)
+    plen, have_proofs = hybrid.piece_length(total), blocks is not None
+    done, partial = saved if saved is not None else state.load_progress(job, plen, have_proofs, name)
+    try:
+        ResumableSHA256()
+        piece_checkpoints = True
+    except RuntimeError:
+        piece_checkpoints = False
+        print("    Using file-boundary checkpoints (resumable hashing unavailable).")
+    if partial and not piece_checkpoints:
+        print("    Discarding unfinished piece progress; the interrupted file will be read again.")
+        partial = None
+        state.save_files(job, plen, have_proofs, done, name)
     if blocks is not None:
-        blocks.keep([(f["path"], -(-f["size"] // hybrid.BLOCK)) for f in done])
+        if not done and partial is None and state.blocks_path(name).exists() and state.blocks_path(name).stat().st_size:
+            print("    Discarding incomplete block hashes; no finished file was checkpointed.")
+        kept = [(f["path"], -(-f["size"] // hybrid.BLOCK)) for f in done]
+        if partial:
+            kept.append((partial["path"], partial["offset"] // hybrid.BLOCK))
+        blocks.keep(kept)
+        if partial:
+            blocks.verify_partial(partial["path"], bytes.fromhex(partial["roots"]), plen)
     lease = Lease(key, job["leaseId"], total, name)
     lease.renew()  # confirm we hold the lease before streaming
     lease.start()
-    sums = {f["path"]: (f["sha256"], f["size"]) for f in done}
     progress = ui.work_progress(total)
     rate_limiter = source.RateLimiter(max_download_rate) if max_download_rate is not None else None
+    sums = {f["path"]: (f["sha256"], f["size"]) for f in done}
 
     def on_read(n):
         lease.note(n)
         progress.update(n)
 
+    def on_reuse(n):
+        lease.note(n)
+        ui.work_reuse(progress, n)
+
     def on_end(path, digest, size):
         sums[path] = (digest, size)
 
     def on_file(path, hashes):
+        nonlocal partial
         size, *rest = hashes
         done.append({"path": path, "size": size, "sha256": sums[path][0], "hashes": [h.hex() for h in rest]})
+        partial = None
         if blocks is not None:
-            blocks.flush()  # the hashes reach the file before the checkpoint that counts them
-        state.save_files(job, plen, proofs, done, name)
+            blocks.flush()
+        state.save_files(job, plen, have_proofs, done, name)
 
-    if done:
-        print(f"    resuming: {len(done)} of {len(files)} files already hashed")
-        on_read(sum(f["size"] for f in done))
-    finished = {f["path"]: (f["size"], *map(bytes.fromhex, f["hashes"])) for f in done}
-    sources = [
-        (
-            f["path"].split("/"),
-            lambda f=f: source.open_file(repo, revision, f["path"], on_read, on_end, rate_limiter),
-        )
-        for f in files
-    ]
+    sizes = {f["path"]: f["size"] for f in files}
+
+    def on_piece(path, offset, v1, roots, stream):
+        nonlocal partial
+        if offset >= sizes[path]:
+            return  # the finished-file checkpoint follows; avoid an EOF Range request
+        partial = {
+            "path": path,
+            "offset": offset,
+            "v1": v1.hex(),
+            "roots": roots.hex(),
+            "sha256": stream.sha.checkpoint().hex(),
+        }
+        if blocks is not None:
+            blocks.flush()
+        state.save_files(job, plen, have_proofs, done, name, partial=partial)
+
+    def opener(path):
+        if not piece_checkpoints:
+            return source.open_file(repo, revision, path, on_read, on_end, rate_limiter)
+        if partial and partial["path"] == path:
+            offset = partial["offset"]
+            sha = ResumableSHA256.restore(bytes.fromhex(partial["sha256"]), offset)
+        else:
+            offset, sha = 0, ResumableSHA256()
+        return source.open_file(repo, revision, path, on_read, on_end, rate_limiter, offset, sha)
+
     try:
+        if done or partial:
+            print(f"    resuming: {len(done)} of {len(files)} files already hashed")
+            on_reuse(sum(f["size"] for f in done) + (partial["offset"] if partial else 0))
+        finished = {f["path"]: (f["size"], *map(bytes.fromhex, f["hashes"])) for f in done}
+        sources = [(f["path"].split("/"), lambda f=f: opener(f["path"])) for f in files]
         data, v1, _v2 = hybrid.build_from(
-            repo.split("/")[1], sources, trackers, plen, blocks=blocks, done=finished, on_file=on_file
+            repo.split("/")[1],
+            sources,
+            trackers,
+            plen,
+            blocks=blocks,
+            done=finished,
+            on_file=on_file,
+            partial=partial,
+            on_piece=on_piece if piece_checkpoints else None,
         )
     finally:
         lease.stop()

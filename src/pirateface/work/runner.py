@@ -56,14 +56,18 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         ]
     )
     state.save(job, name)
-    old_piece_checkpoint = state._path(name).with_suffix(".progress.sqlite")
-    if old_piece_checkpoint.exists():
-        print(f"    Older SQLite progress is not used by this version and was kept at {old_piece_checkpoint}.")
     try:
         plen = hybrid.piece_length(total)
         saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
         with proofs.sidecar(state.blocks_path(name)) as blocks:
-            data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=saved)
+            try:
+                data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=saved)
+            except (OSError, ValueError, RuntimeError) as e:
+                # A checkpoint that does not check out (corrupt block hashes, an unrestorable SHA-256 state)
+                # is discarded rather than aborting the run: rebuild from scratch.
+                print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")
+                state.clear_files(name)
+                data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=([], None))
             if len(data) > MAX_UPLOAD_BYTES:
                 raise user.SeedError("the .torrent is over the 3 MB upload limit")
             block_proofs = proofs.answer(key, data, blocks)
@@ -73,8 +77,6 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         state.clear(name, files=not isinstance(e, LeaseLost))
         site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
         raise
-    except (OSError, ValueError, RuntimeError) as e:
-        raise user.SeedError(f"could not use progress checkpoint: {e}. Saved lease and progress were kept") from e
     status, answer = site.complete(key, job["leaseId"], data, manifest, block_proofs)
     if site.transient(status):
         raise WorkUnreachable(
@@ -162,13 +164,10 @@ def run(args):
     except user.SeedError as e:
         sys.exit(f"error: {e}")
     if args.clear_progress:
-        checkpoint_path = state._path(args.name).with_suffix(".progress.sqlite")
         try:
-            checkpoint_path.unlink(missing_ok=True)
-            checkpoint_path.with_name(checkpoint_path.name + "-journal").unlink(missing_ok=True)
             state.clear_files(args.name)
         except OSError as e:
-            sys.exit(f"error: could not remove progress checkpoint {checkpoint_path}: {e}")
+            sys.exit(f"error: could not remove progress checkpoint: {e}")
         print("Discarded saved progress hashes for this worker; the saved lease was not changed.")
     trackers = api.trackers(key)
     max_bytes = None if args.max_size is None else args.max_size * 1024**3

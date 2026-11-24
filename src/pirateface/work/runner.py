@@ -2,6 +2,9 @@
 
 import sys
 import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any
 
 from pirateface import ui
 from pirateface.client import api
@@ -12,6 +15,46 @@ from pirateface.work.errors import LeaseLost, Oversize, WorkError, WorkUnreachab
 
 WORK_BACKOFF_MIN = 30  # the first pause after a failed lease poll or a failed job; doubles to the cap
 WORK_BACKOFF_MAX = 300  # cap: the site keeps a lease for 10 minutes, so a 5-minute pause is safe
+
+
+@dataclass(frozen=True)
+class Backoff:
+    """The pause both failure arms share. A site answer resets it; a failure doubles it up to the cap."""
+
+    seconds: int = WORK_BACKOFF_MIN
+
+    def reset(self) -> "Backoff":
+        return Backoff(WORK_BACKOFF_MIN)
+
+    def escalate(self) -> "Backoff":
+        return Backoff(min(self.seconds * 2, WORK_BACKOFF_MAX))
+
+
+@dataclass(frozen=True)
+class LoopState:
+    """Everything the loop carries between iterations."""
+
+    pending: dict[str, Any] | None = None  # saved checkpoint to resume, or None to ask for a new job
+    backoff: Backoff = field(default_factory=Backoff)
+
+
+class NextAction(Enum):
+    """What the loop does after a poll."""
+
+    RETRY = auto()  # go back to the top of the loop
+    EXIT = auto()  # return the exit code carried by the outcome
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Typed verdict of one iteration of the loop; fields are only meaningful for the action shown."""
+
+    action: NextAction
+    state: LoopState
+    message: str | None = None  # line to print before acting
+    exit_code: int | None = None  # exit code when action is EXIT
+    sleep: float | None = None  # seconds to sleep before acting
+    stderr: bool = False  # True prints the message to stderr
 
 
 def _consent():
@@ -181,71 +224,94 @@ def run(args):
         sys.exit(f"error: worker {label} already has an active checkpoint lock; stop it or choose another --name")
 
 
+def _step(args, loop, key, trackers, max_bytes, max_download_rate):
+    """Run one poll and turn its result into the next typed verdict. Exits via sys.exit on the failure paths
+    exactly as the loop always has; the loop owns the sleep and the print."""
+    backoff = loop.backoff
+    try:
+        if loop.pending:
+            listed = _resume_once(key, trackers, args.name, loop.pending, max_bytes, max_download_rate)
+            if listed is None:
+                # The site answered, so the site is not unreachable: this saved lease cannot be kept
+                # (expired, refused, or not renewable). Reset the pause before asking for the next job.
+                return Outcome(NextAction.RETRY, LoopState(None, backoff.reset()))
+            loop = LoopState(None, backoff)
+        else:
+            listed = _work_once(key, trackers, args.name, max_bytes, max_download_rate)
+    except (WorkUnreachable, Oversize) as e:
+        try:
+            pending = state.load(args.name)
+        except OSError as state_error:
+            sys.exit(f"error: {state_error}")
+        if args.once:
+            sys.exit(f"error: {e}")
+        # None is a failed job: the site is down or busy, this lane still holds a lease, or the site offered
+        # a row this run won't take. Pause and ask again, doubling up to the cap.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(pending, backoff.escalate()),
+            message=f"error: {e}. Checking again in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    except WorkError as e:
+        if args.once:
+            sys.exit(f"error: {e}")
+        # The lease is cleared and given back on a best-effort release, so the site may offer the same
+        # row again at once. Pause before asking, the way the Oversize arm above already does: retrying
+        # at once only spins. Both arms share `backoff`, so failures of either kind escalate together.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.escalate()),
+            message=f"error: {e}. Taking the next job in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    except user.SeedError as e:
+        sys.exit(
+            f"error: {e}. The lease lapses after 10 minutes without renewal; the request then returns to the queue."
+        )
+    if listed is None:
+        if args.once:
+            return Outcome(
+                NextAction.EXIT, LoopState(None, backoff.reset()), message="No work is queued right now.", exit_code=0
+            )
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.reset()),
+            message=f"Nothing queued. Checking again in {args.idle} s.",
+            sleep=args.idle,
+        )
+    if listed is False:
+        if args.once:
+            return Outcome(NextAction.EXIT, LoopState(None, backoff.reset()), exit_code=1)
+        # A clean run that did not list the job (a refused complete, an expired saved lease): the site
+        # answered, so the pause resets only on a listed job. Pause before asking for the next job.
+        return Outcome(
+            NextAction.RETRY,
+            LoopState(None, backoff.escalate()),
+            message=f"Job not listed. Taking the next job in {backoff.seconds} s.",
+            sleep=backoff.seconds,
+            stderr=True,
+        )
+    # A listed job answered the site: the pause resets.
+    if args.once:
+        return Outcome(NextAction.EXIT, LoopState(None, backoff.reset()), exit_code=0)
+    return Outcome(NextAction.RETRY, LoopState(None, backoff.reset()))
+
+
 def _run_locked(args, key, trackers, max_bytes, max_download_rate):
     try:
         pending = state.load(args.name)
     except OSError as e:
         sys.exit(f"error: {e}")
-    backoff = WORK_BACKOFF_MIN
+    loop = LoopState(pending=pending)
     while True:
-        try:
-            if pending:
-                listed = _resume_once(key, trackers, args.name, pending, max_bytes, max_download_rate)
-                if listed is None:
-                    # The site answered, so the site is not unreachable: this saved lease cannot be kept
-                    # (expired, refused, or not renewable). Reset the pause before asking for the next job.
-                    backoff = WORK_BACKOFF_MIN
-                    pending = None
-                    continue
-                pending = None
-            else:
-                listed = _work_once(key, trackers, args.name, max_bytes, max_download_rate)
-        except (WorkUnreachable, Oversize) as e:
-            try:
-                pending = state.load(args.name)
-            except OSError as state_error:
-                sys.exit(f"error: {state_error}")
-            if args.once:
-                sys.exit(f"error: {e}")
-            # None is a failed job: the site is down or busy, this lane still holds a lease, or the site offered
-            # a row this run won't take. Pause and ask again, doubling up to the cap.
-            print(f"error: {e}. Checking again in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        except WorkError as e:
-            pending = None
-            if args.once:
-                sys.exit(f"error: {e}")
-            # The lease is cleared and given back on a best-effort release, so the site may offer the same
-            # row again at once. Pause before asking, the way the Oversize arm above already does: retrying
-            # at once only spins. Both arms share `backoff`, so failures of either kind escalate together.
-            print(f"error: {e}. Taking the next job in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        except user.SeedError as e:
-            sys.exit(
-                f"error: {e}. The lease lapses after 10 minutes without renewal; the request then returns to the queue."
-            )
-        if listed is None:
-            if args.once:
-                print("No work is queued right now.")
-                return 0
-            print(f"Nothing queued. Checking again in {args.idle} s.")
-            backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
-            time.sleep(args.idle)
-            continue
-        if listed is False:
-            if args.once:
-                return 1
-            # A clean run that did not list the job (a refused complete, an expired saved lease): the site
-            # answered, so the pause resets only on a listed job. Pause before asking for the next job.
-            print(f"Job not listed. Taking the next job in {backoff} s.", file=sys.stderr)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
-            continue
-        backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
-        if args.once:
-            return 0
-        continue
+        outcome = _step(args, loop, key, trackers, max_bytes, max_download_rate)
+        if outcome.message:
+            print(outcome.message, file=sys.stderr if outcome.stderr else None)
+        if outcome.sleep is not None:
+            time.sleep(outcome.sleep)
+        if outcome.action is NextAction.EXIT:
+            return outcome.exit_code
+        loop = outcome.state

@@ -29,7 +29,7 @@ from pirateface.index import FILE, INDEX_REPO
 WS_HOSTS = {"pirateface.co"}
 _REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
 _HASH = re.compile(r"[0-9a-fA-F]{40}")
-_BTMH = re.compile(r"[0-9a-fA-F]{64}")
+_BTMH = re.compile(r"1220[0-9a-fA-F]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 # Carried in the package as the fallback for a copy that has never synced: the site names the current build,
@@ -98,19 +98,22 @@ def _magnet_for(infohash, query, ws_url):
     """A magnet built only from what was validated: the v1 infohash (plus a hex-validated v2 one), one web
     seed, and the site's own trackers. A shard's tracker URLs and any other decoration are never carried
     into a lookup: libtorrent would be talking to a server the shard can name."""
-    params = [("xt", f"urn:btih:{infohash}")]
+    # The xt values are written out literally: urlencode percent-encodes the ":" and "/" in them, which
+    # breaks the magnet's standard form and the tools that parse it. Only the ws= and tr= values are quoted
+    # -- they are URLs that must survive inside the query string.
+    parts = [f"xt=urn:btih:{infohash}"]
     for xt in query.get("xt", ()):
         digest = xt.removeprefix("urn:btmh:")
         if digest == xt:
             continue
         if _BTMH.fullmatch(digest):
-            params.append(("xt", f"urn:btmh:{digest.lower()}"))
+            parts.append(f"xt=urn:btmh:{digest.lower()}")
             break
     if ws_url:
-        params.append(("ws", ws_url))
+        parts.append(f"ws={urllib.parse.quote(ws_url, safe='')}")
     for tracker in api.TRACKERS:
-        params.append(("tr", tracker))
-    return "magnet:?" + urllib.parse.urlencode(params)
+        parts.append(f"tr={urllib.parse.quote(tracker, safe='')}")
+    return "magnet:?" + "&".join(parts)
 
 
 def infohash_of(magnet):

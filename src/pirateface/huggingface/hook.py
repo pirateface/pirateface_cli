@@ -135,19 +135,22 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
     if torrent_checked:
         # The index has no fingerprint to check against. Ask Hugging Face for the real one when it answers:
         # the bytes are then held to that, not to nothing. Only when Hugging Face cannot answer is the
-        # torrent's own hashes the check.
+        # torrent's own hashes the check. An answer that lacks the file is an answer: don't fall through
+        # to the torrent's own hashes when Hugging Face is reachable and has nothing to give.
         try:
             from pirateface.seed import hub
 
             files = hub.model(repo_id, entry.commit)[2]
-            pair = files.get(filename)
-            if pair and pair[0]:
-                etag = _etag_hex(pair[0]).lower()
-                torrent_checked = False
         except Exception as e:
             log(
                 f"{filename}: Hugging Face could not answer with a fingerprint ({e}); the torrent's own hashes are the check"
             )
+        else:
+            pair = files.get(filename)
+            if not (pair and pair[0]):
+                raise torrent.Unavailable(f"Hugging Face answered but has no fingerprint for {filename}")
+            etag = _etag_hex(pair[0]).lower()
+            torrent_checked = False
     # Checked before the download, and on the shape _place_checked can compare -- it compares against
     # hexdigest(), which is lowercase, so normalise here rather than fetching a file that cannot match.
     etag = _etag_hex(etag).lower()

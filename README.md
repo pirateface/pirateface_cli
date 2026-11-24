@@ -76,8 +76,8 @@ file    tokenizer.json  0.7 MB  from the index (build 2026-11-09), fingerprint m
 The bytes are checked against the Hugging Face fingerprint the download already holds, and libtorrent hashes
 every piece before it counts it as downloaded: nothing is moved into the cache unless the whole file matches
 that fingerprint. When Hugging Face cannot answer for the file, the cached index's copy is checked against the
-torrent's own piece hashes instead — the infohash the shard's swarm commits to — and that is what proves it
-is the right bytes.
+torrent's own piece hashes instead, using the infohash the shard's swarm commits to, which is what
+proves it is the right bytes.
 A model the copy doesn't list, a torrent that carries only some of a repo's files, a removals list that
 can't be read, or a download with no fingerprint: that file comes from Hugging Face as usual, and the
 reason is printed.
@@ -108,7 +108,7 @@ libtorrent is used with its defaults, so the download has network consequences b
 
 - Listens on `0.0.0.0:0,[::]:0` by default, so the swarm knows where you are. `PF_LISTEN` changes these interfaces.
 - UPnP and NAT-PMP port mapping are on, so a home torrent client may get a port opened for you.
-- DHT and LSD are on, so swarm lookups and peer discovery use the public trackers' gossip rather than just Pirate Face's trackers.
+- DHT and LSD are on, so swarm lookups and peer discovery use the public BitTorrent DHT and your local network in addition to Pirate Face's trackers.
 - Uploading is uncapped while downloading: pieces you download from a peer are also served to it, the same as any BitTorrent client.
 
 ## Development

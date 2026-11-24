@@ -67,7 +67,9 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
                 # is discarded rather than aborting the run: rebuild from scratch.
                 print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")
                 state.clear_files(name)
-                data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=([], None))
+                data, manifest, infohash = build.build(
+                    job, key, trackers, name, blocks, max_download_rate, saved=([], None)
+                )
             if len(data) > MAX_UPLOAD_BYTES:
                 raise user.SeedError("the .torrent is over the 3 MB upload limit")
             block_proofs = proofs.answer(key, data, blocks)

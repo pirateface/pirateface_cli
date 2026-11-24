@@ -402,7 +402,7 @@ def _revive_if_finished(repo_id, h, magnet):
     """Re-add a finished handle (with resume data, so nothing is re-hashed), only while no other fetch
     is using it; otherwise return h as-is. A "finished" torrent drops its web seed, so the next file
     never gets bytes."""
-    # Wait for other fetches to drain their last file -- every counted fetch decrements in a finally, so
+    # Wait for other fetches to drain their last file -- each fetch decrements _active in a finally, so
     # this drains; the wait can take as long as its flush plus any wait behind the global flush lock.
     with _idle_cv:
         while _active.get(repo_id) and h.status().state == lt.torrent_status.finished:

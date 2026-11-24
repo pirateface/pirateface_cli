@@ -54,6 +54,7 @@ class SiteAnswer:
     def unusable(self):
         return self.status is Status.UNUSABLE
 
+
 # One dead lookup per half-minute, not one per file: an outage costs 10s once, then fails fast.
 UNREACHABLE_FOR = 30.0
 _down_until = 0.0

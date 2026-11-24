@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+from dataclasses import dataclass
 from importlib.metadata import version
 
 from pirateface._http import NO_REDIRECTS
@@ -19,15 +20,40 @@ from pirateface._http import request as _http_request
 from pirateface.config import API, flag
 
 
-class Answer(enum.Enum):
-    """What the site said about a repo when it had no listing to give."""
+class Status(enum.Enum):
+    """What the site said about a repo. FOUND carries the site's entry; the other three are answers with no
+    entry. All four are kept as one typed value, never as a dict/enum union the caller has to discriminate."""
 
+    FOUND = "found"
     NOT_LISTED = "not listed"  # a 404
     LICENSE_REQUIRED = "licence terms to accept first"  # the site's own JSON 401/403
     UNUSABLE = "an answer this client cannot use"  # any other 4xx, or JSON that isn't an entry
 
 
-NOT_LISTED, LICENSE_REQUIRED, UNUSABLE = Answer
+@dataclass(frozen=True)
+class SiteAnswer:
+    """One lookup's typed result: `status` discriminates, `entry` is the site's entry only when `status` is
+    Status.FOUND. Any other combination is not constructed."""
+
+    status: Status
+    entry: dict | None = None
+
+    @property
+    def found(self):
+        return self.status is Status.FOUND
+
+    @property
+    def not_listed(self):
+        return self.status is Status.NOT_LISTED
+
+    @property
+    def license_required(self):
+        return self.status is Status.LICENSE_REQUIRED
+
+    @property
+    def unusable(self):
+        return self.status is Status.UNUSABLE
+
 
 # One dead lookup per half-minute, not one per file: an outage costs 10s once, then fails fast.
 UNREACHABLE_FOR = 30.0
@@ -128,15 +154,16 @@ def search_models(query):
 
 @_site_answer
 def lookup(repo_id, quant=None):
-    """Pirate Face's entry (a dict) for the repo, or an Answer: NOT_LISTED, LICENSE_REQUIRED or UNUSABLE.
+    """Pirate Face's answer about the repo, as a typed SiteAnswer: Status.FOUND carries the entry,
+    Status.NOT_LISTED / LICENSE_REQUIRED / UNUSABLE carry no entry.
     Raises Unreachable when the site cannot be reached at all, so an outage is never "not on Pirate Face".
     quant: one of entry["quants"][i]["quant"], when the revision has a torrent per quant."""
     params = {"repo": repo_id, **({"quant": quant} if quant else {})}
     status, body = _get(f"{API}/api/torrents?" + urllib.parse.urlencode(params), 10)
     if status == 404:
-        return NOT_LISTED
+        return SiteAnswer(Status.NOT_LISTED)
     if status >= 400 and status not in (401, 403):
-        return UNUSABLE
+        return SiteAnswer(Status.UNUSABLE)
     try:
         entry = json.loads(body)
     except ValueError as e:
@@ -144,25 +171,25 @@ def lookup(repo_id, quant=None):
         # 401/403 must not send the user to accept licence terms for the wrong fix.
         raise Unreachable(f"could not read {API}'s answer") from e
     if status in (401, 403):
-        return LICENSE_REQUIRED
-    return entry if isinstance(entry, dict) else UNUSABLE
+        return SiteAnswer(Status.LICENSE_REQUIRED)
+    return SiteAnswer(Status.FOUND, entry) if isinstance(entry, dict) else SiteAnswer(Status.UNUSABLE)
 
 
 def lookup_soft(repo_id):
     """lookup(), with no usable answer (an unreachable site or UNUSABLE) reported as None. The other answers
     pass through, so callers that print their own message can still tell them apart."""
     try:
-        entry = lookup(repo_id)
+        answer = lookup(repo_id)
     except Unreachable:
         return None
-    return None if entry is UNUSABLE else entry
+    return None if answer.unusable else answer
 
 
 @_site_answer
 def torrent_file(repo_id, quant=None):
     """The .torrent's bytes if Pirate Face publishes one for the repo (or that quant), else None."""
-    entry = lookup(repo_id, quant)
-    path = entry.get("torrent") if isinstance(entry, dict) else None
+    answer = lookup(repo_id, quant)
+    path = answer.entry.get("torrent") if answer.found else None
     if not path:
         return None
     try:
@@ -176,8 +203,8 @@ def torrent_file(repo_id, quant=None):
 def pf_only(repo_id):
     """listed(repo_id) if only Pirate Face has the repo, else None. Raises Unreadable if the site's
     listing cannot be read: every caller in huggingface/ catches it."""
-    entry = lookup(repo_id)
-    return listed(repo_id) if isinstance(entry, dict) and entry.get("hf") is False else None
+    answer = lookup(repo_id)
+    return listed(repo_id) if answer.found and answer.entry.get("hf") is False else None
 
 
 @functools.cache
@@ -186,8 +213,8 @@ def listed(repo_id):
     for. None if the repo isn't listed, has no .torrent (a licence-gated listing carries none) or no sha256s.
     Raises Unreadable when the site answered with something this client cannot read: that is not an outage,
     and functools.cache keeps no exception, so the answer is parsed again on the next call."""
-    entry = lookup(repo_id)
-    if not isinstance(entry, dict):
+    answer = lookup(repo_id)
+    if not answer.found:
         return None
     data = torrent_file(repo_id)
     if not data:
@@ -195,9 +222,9 @@ def listed(repo_id):
     from pirateface.client import torrent  # torrent imports api
 
     try:
-        sha = {f["path"]: f["sha256"] for f in entry.get("files") or []}
+        sha = {f["path"]: f["sha256"] for f in answer.entry.get("files") or []}
         files = {path: (size, sha[path], url) for path, size, url in torrent.files_in(data) if path in sha}
-        found = {"repo_id": entry["repoId"], "commit": entry["revision"], "files": files}
+        found = {"repo_id": answer.entry["repoId"], "commit": answer.entry["revision"], "files": files}
     except torrent.Unsafe:
         return None  # a listing the client won't write: same answer as "not only on Pirate Face"
     except (MemoryError, RecursionError):

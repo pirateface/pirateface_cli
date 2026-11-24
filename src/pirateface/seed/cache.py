@@ -71,22 +71,22 @@ def plan_cache():
         if need and not (snap / need).exists():
             yield row("skip", f"{lic} copies must include {need}; download it too", size)
             continue
-        entry = api.lookup_soft(repo)
-        if entry is None:
+        answer = api.lookup_soft(repo)
+        if answer is None:
             yield row("skip", "could not reach Pirate Face", size)
-        elif entry is api.LICENSE_REQUIRED:
+        elif answer.license_required:
             yield row("skip", f"on Pirate Face; accept the license terms at {API}/{repo}", size)
-        elif entry is api.NOT_LISTED:
+        elif answer.not_listed:
             yield row("submit", "complete, not on Pirate Face yet", size)
         elif any(
-            remote[p][0] not in {f["sha256"] for q in entry.get("quants") or [entry] for f in q["files"]}
+            remote[p][0] not in {f["sha256"] for q in answer.entry.get("quants") or [answer.entry] for f in q["files"]}
             for p in remote
             if WEIGHT.search(p) and not EXTRA.search(p) and (snap / p).exists()
         ):
             yield row("submit", "a quant Pirate Face doesn't list yet", size)
-        elif entry.get("revision") != rev:
+        elif answer.entry.get("revision") != rev:
             yield row("skip", "on Pirate Face at another revision", size)
-        elif not entry.get("torrent"):
+        elif not answer.entry.get("torrent"):
             yield row("skip", f"on Pirate Face; accept the license terms at {API}/{repo}", size)
         else:
             yield row("seed", "on Pirate Face; seed it", size)

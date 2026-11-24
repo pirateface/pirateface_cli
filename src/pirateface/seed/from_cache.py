@@ -206,14 +206,14 @@ def _listings(repos, blobs, snapshots):
     try:
         for repo in tqdm(sorted(repos, key=str.casefold), desc="Checking Pirate Face listings", unit="repo"):
             base = api.lookup(repo)
-            for listed in (base.get("quants") or [base]) if isinstance(base, dict) else []:
+            for listed in (base.entry.get("quants") or [base.entry]) if base.found else []:
                 quant = listed.get("quant") if isinstance(listed, dict) else None
-                entry = api.lookup(repo, quant) if quant else base
-                data = api.torrent_file(repo, quant) if isinstance(entry, dict) else None
+                answer = api.lookup(repo, quant) if quant else base
+                data = api.torrent_file(repo, quant) if answer.found else None
                 if not data:
                     continue
                 try:
-                    candidate = _candidate(repo, quant, entry, data, blobs, snapshots)
+                    candidate = _candidate(repo, quant, answer.entry, data, blobs, snapshots)
                 except torrent.Unsafe:
                     continue
                 if candidate:

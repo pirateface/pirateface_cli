@@ -36,8 +36,8 @@ def weights(src, paths):
 def matching_quant(repo, src):
     """The listed quant whose weight files src has most of, or None for the default torrent.
     A revision can have one torrent per quant (say UD-Q8_K_XL and UD-IQ4_XS)."""
-    entry = api.lookup_soft(repo)  # an outage becomes None; the .torrent fetch reports it
-    quants = (entry.get("quants") or []) if isinstance(entry, dict) else []
+    answer = api.lookup_soft(repo)  # an outage becomes None; the .torrent fetch reports it
+    quants = (answer.entry.get("quants") or []) if answer and answer.found else []
     best = max(
         ((q, len(weights(src, [f["path"] for f in q["files"]]))) for q in quants),
         key=lambda t: t[1],
@@ -90,16 +90,16 @@ def seed(repo, folder=None, revision=None, per_file=False):
     if folder and not Path(folder).is_dir():
         raise SeedError(f"{folder} is not a folder")
     key = user.load_key()
-    entry = api.lookup_soft(repo)
-    if entry is None:
+    answer = api.lookup_soft(repo)
+    if answer is None:
         raise SeedError(f"could not reach {API}")
-    if entry is api.LICENSE_REQUIRED:
+    if answer.license_required:
         raise SeedError(f"accept the license terms at {API}/{repo}")
-    if entry is api.NOT_LISTED:
+    if answer.not_listed:
         src = Path(folder) if folder else local_copy(repo, revision, download=True)
         submit.submit_new(repo, src, revision or (None if folder else src.name), key, per_file=per_file)
     else:
-        src = Path(folder) if folder else local_copy(repo, entry.get("revision"), download=False)
+        src = Path(folder) if folder else local_copy(repo, answer.entry.get("revision"), download=False)
         seed_listed(repo, src, key, per_file)
 
 

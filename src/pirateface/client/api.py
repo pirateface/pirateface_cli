@@ -50,6 +50,17 @@ def _mark_down():
     _down_until = time.monotonic() + UNREACHABLE_FOR
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: an answer means one request against the host it named. Returning None is what
+    hands the 3xx back to the caller, so a credential on a request is not carried to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirects())
+
+
 def request(url, timeout, *, method=None, headers=None, data=None):
     """One way to talk to the site: every request carries `User-Agent: pirateface/<version>`."""
     req = urllib.request.Request(
@@ -58,7 +69,7 @@ def request(url, timeout, *, method=None, headers=None, data=None):
         headers={"User-Agent": f"pirateface/{VERSION}", **(headers or {})},
         method=method,
     )
-    return urllib.request.urlopen(req, timeout=timeout)
+    return _opener.open(req, timeout=timeout)
 
 
 def _site_answer(fetch):

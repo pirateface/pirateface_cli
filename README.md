@@ -14,7 +14,7 @@ Or without installing:
 uv run -p 3.13 --with pirateface python your_script.py
 ```
 
-Anything that downloads through HF (transformers, diffusers, `hf download`) now pulls from the swarm. Every file is checked against Hugging Face's hash. If a model isn't on Pirate Face or a peer stalls, that file comes from Hugging Face as usual. Set `PF_HF_FIRST=1` to reverse the order: each file comes from Hugging Face first and only falls back to the swarm when Hugging Face fails.
+Anything that downloads through HF (transformers, diffusers, `hf download`) now pulls from the swarm. Every file is checked against Hugging Face's SHA-256. If a model isn't on Pirate Face or a peer stalls, that file comes from Hugging Face as usual. The same applies offline, with one caveat: when the cached index stands in for Pirate Face and Hugging Face cannot answer, the bytes are checked against the torrent's own piece hashes instead of a SHA-256. Set `PF_HF_FIRST=1` to reverse the order: each file comes from Hugging Face first and only falls back to the swarm when Hugging Face fails.
 
 Needs Python 3.12 or 3.13. With `uvx`, pass `-p 3.13`.
 
@@ -73,9 +73,11 @@ downloads from its swarm:
 file    tokenizer.json  0.7 MB  from the index (build 2026-11-09), fingerprint matches Hugging Face
 ```
 
-The bytes are checked against the Hugging Face fingerprint the download already holds. libtorrent hashes
-every piece before it counts it as downloaded, and nothing is moved into the cache unless the whole file
-matches that fingerprint.
+The bytes are checked against the Hugging Face fingerprint the download already holds, and libtorrent hashes
+every piece before it counts it as downloaded: nothing is moved into the cache unless the whole file matches
+that fingerprint. When Hugging Face cannot answer for the file, the cached index's copy is checked against the
+torrent's own piece hashes instead — the infohash the shard's swarm commits to — and that is what proves it
+is the right bytes.
 A model the copy doesn't list, a torrent that carries only some of a repo's files, a removals list that
 can't be read, or a download with no fingerprint: that file comes from Hugging Face as usual, and the
 reason is printed.
@@ -98,6 +100,16 @@ pf index --add    # add every magnet in the index to qBittorrent, your seeding t
 | `PF_DISABLE` | Set to `1` to turn the download hook off |
 | `PF_HF_FIRST` | `1` = download from Hugging Face first, swarm only when it fails |
 | `PF_NO_BLOCK_PROOFS` | `1` = `pf work`, `submit` and `seed` submit without block proofs (by default they prove random 16 KiB blocks against the torrent's v2 hashes) |
+| `PF_LISTEN` | libtorrent listen interfaces (default `0.0.0.0:0,[::]:0`) |
+
+## Networking
+
+libtorrent is used with its defaults, so the download has network consequences beyond the swarm itself:
+
+- Listens on `0.0.0.0:0,[::]:0` by default, so the swarm knows where you are. `PF_LISTEN` changes these interfaces.
+- UPnP and NAT-PMP port mapping are on, so a home torrent client may get a port opened for you.
+- DHT and LSD are on, so swarm lookups and peer discovery use the public trackers' gossip rather than just Pirate Face's trackers.
+- Uploading is uncapped while downloading: pieces you download from a peer are also served to it, the same as any BitTorrent client.
 
 ## Development
 

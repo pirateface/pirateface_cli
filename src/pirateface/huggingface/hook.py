@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from pirateface import config, ui
@@ -120,7 +121,8 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
     repo and a revision. Without one there is nothing to compare, so the file is left to Hugging Face.
 
     `answered`: the cached index's own listing stood in for Hugging Face, so there is no fingerprint, only a
-    cache key. The check is then the torrent's piece hashes, which the index's infohash commits to.
+    cache key. The check is then Hugging Face's fingerprint when Hugging Face answers, and the torrent's own
+    piece hashes (which the index's infohash commits to) when it does not.
     """
     entry = mirror.resolve(repo_id)
     if entry is None:
@@ -130,6 +132,22 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
             else "not in the cached index"
         )
     torrent_checked = answered is not None and answered["files"][filename][1] is None
+    if torrent_checked:
+        # The index has no fingerprint to check against. Ask Hugging Face for the real one when it answers:
+        # the bytes are then held to that, not to nothing. Only when Hugging Face cannot answer is the
+        # torrent's own hashes the check.
+        try:
+            from pirateface.seed import hub
+
+            files = hub.model(repo_id, entry.commit)[2]
+            pair = files.get(filename)
+            if pair and pair[0]:
+                etag = _etag_hex(pair[0]).lower()
+                torrent_checked = False
+        except Exception as e:
+            log(
+                f"{filename}: Hugging Face could not answer with a fingerprint ({e}); the torrent's own hashes are the check"
+            )
     # Checked before the download, and on the shape _place_checked can compare -- it compares against
     # hexdigest(), which is lowercase, so normalise here rather than fetching a file that cannot match.
     etag = _etag_hex(etag).lower()
@@ -169,7 +187,8 @@ def _place_checked(src, dest, etag, torrent_checked=False):
     else:
         return False
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.name + ".pf.incomplete")
+    with tempfile.NamedTemporaryFile(dir=dest.parent, prefix=f"{dest.name}.pf.incomplete.", delete=False) as tf:
+        tmp = Path(tf.name)
     try:
         with src.open("rb") as f, tmp.open("wb") as out:
             while chunk := f.read(1 << 20):

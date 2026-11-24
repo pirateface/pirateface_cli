@@ -4,9 +4,30 @@ import http.client
 import sys
 from pathlib import Path
 
+import libtorrent as lt
+
 from pirateface.client import api
 from pirateface.config import API, MAX_UPLOAD_BYTES
 from pirateface.seed import user
+
+
+def _scrub(data):
+    """A .torrent's info dict re-encoded on its own, or None when the bytes are not a .torrent this command
+    can re-encode. The private tracker, comments and any other decoration is dropped before the file is
+    uploaded: only the info that names the content goes to the site."""
+    try:
+        decoded = lt.bdecode(data)
+    except Exception:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    info = decoded.get(b"info")
+    if not isinstance(info, dict):
+        return None
+    try:
+        return lt.bencode({b"info": info})
+    except Exception:
+        return None
 
 
 def _collect(paths):
@@ -46,6 +67,10 @@ def run(args):
             data = path.read_bytes()
         except OSError as e:
             print(f"could not read {path}: {e.strerror or e}")
+            continue
+        data = _scrub(data)
+        if data is None:
+            print(f"skipped (not a valid .torrent): {path.name}")
             continue
         try:
             status, body = api.restore(key, data)

@@ -29,6 +29,7 @@ from pirateface.index import FILE, INDEX_REPO
 WS_HOSTS = {"pirateface.co"}
 _REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
 _HASH = re.compile(r"[0-9a-fA-F]{40}")
+_BTMH = re.compile(r"[0-9a-fA-F]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 # Carried in the package as the fallback for a copy that has never synced: the site names the current build,
@@ -90,7 +91,26 @@ def _web_seed_from(query):
         return None
     repo = f"{parts[2]}/{parts[3]}"
     commit = parts[4] if len(parts) > 4 and _COMMIT.fullmatch(parts[4]) else None
-    return (repo, commit) if _REPO.fullmatch(repo) else None
+    return (repo, commit, ws[0]) if _REPO.fullmatch(repo) else None
+
+
+def _magnet_for(infohash, query, ws_url):
+    """A magnet built only from what was validated: the v1 infohash (plus a hex-validated v2 one), one web
+    seed, and the site's own trackers. A shard's tracker URLs and any other decoration are never carried
+    into a lookup: libtorrent would be talking to a server the shard can name."""
+    params = [("xt", f"urn:btih:{infohash}")]
+    for xt in query.get("xt", ()):
+        digest = xt.removeprefix("urn:btmh:")
+        if digest == xt:
+            continue
+        if _BTMH.fullmatch(digest):
+            params.append(("xt", f"urn:btmh:{digest.lower()}"))
+            break
+    if ws_url:
+        params.append(("ws", ws_url))
+    for tracker in api.TRACKERS:
+        params.append(("tr", tracker))
+    return "magnet:?" + urllib.parse.urlencode(params)
 
 
 def infohash_of(magnet):
@@ -109,7 +129,7 @@ def _infohash_from(query):
         if len(digest) == 32:
             with contextlib.suppress(ValueError):
                 return base64.b32decode(digest.upper()).hex()
-        elif len(digest) == 40:
+        elif len(digest) == 40 and _HASH.fullmatch(digest):
             return digest.lower()
     return None
 
@@ -168,7 +188,8 @@ def _parsed():
             seed = _web_seed_from(query)
             infohash = _infohash_from(query) if seed else None
             if seed and infohash:
-                found[seed[0]] = Entry(magnet, infohash, date, seed[1])
+                repo_id, commit, ws_url = seed
+                found[repo_id] = Entry(_magnet_for(infohash, query, ws_url), infohash, date, commit)
         for repo_id, entry in list(found.items()):
             if entry.infohash in gone:
                 del found[repo_id]

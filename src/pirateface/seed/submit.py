@@ -2,6 +2,7 @@
 
 import base64
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -82,7 +83,7 @@ def build_torrent(src, save_dir, name, trackers, blocks=None):
     print(f"    {len(paths)} files included, {len(skipped)} skipped")
     print("==> Hashing and creating the torrent")
     sums = {}  # SHA-256 of each file, filled by the same read that hashes the pieces
-    data, v1, v2 = hybrid.build(save_dir / name, trackers, sums=sums, blocks=blocks)
+    data, v1, v2 = hybrid.build(save_dir / name, trackers, sums=sums, blocks=blocks, paths=paths)
     return paths, sums, data, v1, v2
 
 
@@ -140,6 +141,11 @@ def choose_license(repo, hf_license, sums, licenses, answers):
         raise SeedError(
             f"the {lic} license requires {need} in the torrent; download it into the model folder and rerun"
         )
+    if need and sums.get(need) == hashlib.sha256(b"").hexdigest():
+        raise SeedError(
+            f"the {lic} license requires {need} in the torrent, but it is empty; "
+            "download it into the model folder and rerun"
+        )
     return lic
 
 
@@ -151,7 +157,7 @@ def evidence_for(repo, revision, lic, match, direct, command, answers):
             f"the local copy (checked by {command})."
         )
     if direct:
-        return f"Direct listing: published on Pirate Face by {repo.split('/')[0]} itself, not on Hugging Face. License: {lic}."
+        return f"Direct listing: submitted directly to Pirate Face (not on Hugging Face). License: {lic}."
     print("    Where did this copy come from? Links, license proof, and why it's gone from Hugging Face if it is.")
     evidence = answers.ask("    Evidence: ", "evidence")
     if evidence is not None and len(evidence) < 30:

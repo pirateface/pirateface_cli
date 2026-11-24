@@ -104,11 +104,17 @@ def files_under(root):
     return [p for p in paths if p[0] != ".pad"]
 
 
-def build(root, trackers, plen=None, sums=None, blocks=None):
+def build(root, trackers, plen=None, sums=None, blocks=None, paths=None):
     """Hybrid torrent of the folder root (its name is the torrent's name). Returns (bytes, v1 hex, v2 hex).
-    sums: a dict to fill with each file's SHA-256, read in the same pass. blocks: as for build_from()."""
+    sums: a dict to fill with each file's SHA-256, read in the same pass. blocks: as for build_from().
+    paths: the files to pack, relative POSIX paths as strings (or lists of components), or None to walk the
+    folder itself. The caller's staged list is preferred over a fresh walk: the folder may hold files the
+    stage step refused, which must never be hashed or published into the torrent."""
     root = Path(root)
-    paths = files_under(root)
+    if paths is None:
+        paths = files_under(root)
+    if paths and isinstance(paths[0], str):
+        paths = [p.split("/") for p in paths]
     if not paths:
         raise ValueError("no files to put in the torrent")
     if plen is None:

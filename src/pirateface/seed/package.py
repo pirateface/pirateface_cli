@@ -14,6 +14,36 @@ from pirateface.listing import listing_problems, unsafe_path
 # Hidden paths (.git, .cache, .env), keys and partial downloads stay out of the torrent.
 SKIP = re.compile(r"(^|/)(\.|__pycache__/|id_rsa)|\.(pem|key|incomplete|lock|part)$")
 
+HF_HUB = ("models--", "datasets--", "spaces--")
+
+
+def _is_junction(p):
+    """Windows directory junction or mount point, true on Windows. Other OSes have no junction concept."""
+    return getattr(os.path, "isjunction", None) is not None and os.path.isjunction(p)
+
+
+def _allowed_link(target, src):
+    """True when a link inside src may be read through: its target stays inside src, or is a Hugging Face
+    hub cache blob (<cache>/models--<author>--<name>/blobs/<hash>) of the repo src sits under
+    (<cache>/models--<author>--<name>/snapshots/<revision>). Anything else is refused."""
+    if target.is_relative_to(src):
+        return True
+    if not target.exists() and not target.is_symlink():
+        return False
+    parent = target.parent
+    if parent.name != "blobs":
+        return False
+    model_dir = parent.parent
+    if not model_dir.name.startswith(HF_HUB):
+        return False
+    if not (model_dir / "snapshots").is_dir():
+        return False
+    try:
+        src.relative_to(model_dir / "snapshots")
+    except ValueError:
+        return False
+    return True
+
 
 def seeds_folder(repo, v1):
     """The seed folder for a repo: author--model, as the Hugging Face cache names it, so two authors can
@@ -79,22 +109,29 @@ def unportable(paths):
 
 def clear_links(dest):
     """Remove the links an earlier run left under dest, and the folders that empties. Real files stay:
-    dest can hold the user's files, or files their torrent client downloaded."""
+    dest can hold the user's files, or files their torrent client downloaded. A symlinked dir, junction
+    or other link to a folder outside dest is never walked and never removed: it is left alone."""
     if not dest.is_dir() or dest.is_symlink():
         return
-    for d, _, names in os.walk(dest, topdown=False):
+    dirs_seen = []
+    for d, dirs, names in os.walk(dest, topdown=True, followlinks=False):
+        dirs[:] = [x for x in dirs if not (Path(d, x).is_symlink() or _is_junction(Path(d, x)))]
         for n in names:
-            if Path(d, n).is_symlink():
-                Path(d, n).unlink()
+            p = Path(d, n)
+            if p.is_symlink() or _is_junction(p):
+                p.unlink()
+        if Path(d) != dest:
+            dirs_seen.append(Path(d))
+    for d in reversed(dirs_seen):
         with contextlib.suppress(OSError):
-            Path(d).rmdir()
+            d.rmdir()
 
 
 def stage(src, dest):
     """Link the model files in src into dest. Returns (included paths, skipped paths)."""
     clear_links(dest)
     included, skipped, seen = [], [], set()
-    for d, dirs, names in os.walk(src, followlinks=True):
+    for d, dirs, names in os.walk(src, topdown=True, followlinks=True):
         # Links are followed (the HF cache is links), but a folder reached twice, as through a link back up
         # the tree, is listed once: a loop would otherwise pack the model into the torrent many times.
         real = Path(d).resolve()
@@ -102,8 +139,15 @@ def stage(src, dest):
             dirs.clear()
             continue
         seen.add(real)
+        for n in dirs:
+            p = Path(d, n)
+            if p.is_symlink() and not _allowed_link(p.resolve(), Path(src).resolve()):
+                raise LinkError(f"{p} links outside the model folder: {p.resolve()}")
         for n in names:
-            rel = Path(d, n).relative_to(src).as_posix()
+            full = Path(d, n)
+            rel = full.relative_to(src).as_posix()
+            if full.is_symlink() and not _allowed_link(full.resolve(), Path(src).resolve()):
+                raise LinkError(f"{full} links outside the model folder: {full.resolve()}")
             (skipped if SKIP.search(rel) else included).append(rel)
     included.sort()
     problems = unportable(included)

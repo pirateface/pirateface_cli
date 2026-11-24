@@ -73,14 +73,26 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         raise WorkUnreachable(
             f"could not submit the torrent: {(answer or {}).get('error', 'the site could not be reached')}"
         )
-    if status == 200:
+    # A 200 body answers only when the site served the request: ok with a known status and no error key.
+    # Anything else (empty or non-dict body, error key, unexpected status) is not listed.
+    if (
+        status == 200
+        and isinstance(answer, dict)
+        and answer.get("ok") is True
+        and not answer.get("error")
+        and answer.get("status") in ("approved", "already_listed", "pending")
+    ):
         state.clear(name)
         # already_listed: the same files are listed under another infohash, which the site returns.
-        if (answer or {}).get("status") == "already_listed":
+        if answer.get("status") == "already_listed":
             print(f"    Already listed: {API}/{job['repoId']} ({answer.get('infohash', '')})")
         else:
             ui.aligned([("listed", f"{API}/{job['repoId']}"), ("infohash", infohash)])
         return True
+    if status == 200:
+        # The site answered 200 but not with a listing: keep the checkpoint and treat the job as refused.
+        print(f"    Not listed (unexpected 200 body): {answer!r}")
+        return False
     state.clear(name)
     print(f"    Not listed ({status}): {(answer or {}).get('error', 'request failed')}")
     return False
@@ -101,8 +113,9 @@ def _work_once(key, trackers, name, max_bytes=None, max_download_rate=None):
             print(f"Resuming saved lease for {checkpoint['job'].get('repoId', 'model')}.")
             resumed = _resume_once(key, trackers, name, checkpoint, max_bytes, max_download_rate)
             if resumed is None:
-                # The saved lease expired between the 409 and renew. Retry the queue now; only sleep if it is empty.
-                return _work_once(key, trackers, name, max_bytes, max_download_rate)
+                # The saved lease expired between the 409 and renew. Let the main loop pause and ask for the next
+                # job; retrying at once would spin.
+                return False
             return resumed
         reason = "; no matching local checkpoint was found" if lease_id else ""
         raise WorkUnreachable(f"lease refused (409): {(job or {}).get('error', 'lease already held')}{reason}")
@@ -199,13 +212,24 @@ def _run_locked(args, key, trackers, max_bytes, max_download_rate):
             sys.exit(
                 f"error: {e}. The lease lapses after 10 minutes without renewal; the request then returns to the queue."
             )
-        backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
         if listed is None:
             if args.once:
                 print("No work is queued right now.")
                 return 0
             print(f"Nothing queued. Checking again in {args.idle} s.")
+            backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
             time.sleep(args.idle)
             continue
+        if listed is False:
+            if args.once:
+                return 1
+            # A clean run that did not list the job (a refused complete, an expired saved lease): the site
+            # answered, so the pause resets only on a listed job. Pause before asking for the next job.
+            print(f"Job not listed. Taking the next job in {backoff} s.", file=sys.stderr)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, WORK_BACKOFF_MAX)
+            continue
+        backoff = WORK_BACKOFF_MIN  # the site answered: reset the pause both failure arms share
         if args.once:
-            return 0 if listed else 1
+            return 0
+        continue

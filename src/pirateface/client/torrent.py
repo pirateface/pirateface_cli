@@ -161,14 +161,14 @@ def _lookup_magnet(repo_id):
     """The repo's magnet, or None to fall back on Hugging Face. NO_SWARM is remembered so the site is
     asked once per process; an unreachable site raises instead, so it is retried next time."""
     try:
-        entry = api.lookup(repo_id)
+        answer = api.lookup(repo_id)
     except api.Unreachable as e:
         raise Unavailable("Pirate Face unreachable") from e
-    if entry is api.LICENSE_REQUIRED:
+    if answer.license_required:
         raise Unavailable(f"accept the license terms at {config.API}/{repo_id}")
-    magnet = entry.get("magnet") if isinstance(entry, dict) else None
+    magnet = answer.entry.get("magnet") if answer.found else None
     if not magnet:
-        ui.not_on_pirateface(repo_id, entry is api.NOT_LISTED and api.request_rescue(repo_id))
+        ui.not_on_pirateface(repo_id, answer.not_listed and api.request_rescue(repo_id))
         _remember(repo_id, RepoState.NO_SWARM)
     return magnet
 

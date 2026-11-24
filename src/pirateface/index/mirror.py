@@ -335,12 +335,12 @@ def published():
     starting point for a copy that has never synced.
     """
     try:
-        entry = api.lookup(INDEX_REPO)
+        answer = api.lookup(INDEX_REPO)
     except api.Unreachable:
         return None
-    if not (isinstance(entry, dict) and entry.get("magnet")):
+    if not (answer.found and answer.entry.get("magnet")):
         return None
-    return entry["magnet"], entry.get("infohash") or infohash_of(entry["magnet"])
+    return answer.entry["magnet"], answer.entry.get("infohash") or infohash_of(answer.entry["magnet"])
 
 
 def _remote_magnet():

@@ -111,7 +111,7 @@ def clear_links(dest):
     """Remove the links an earlier run left under dest, and the folders that empties. Real files stay:
     dest can hold the user's files, or files their torrent client downloaded. A symlinked dir, junction
     or other link to a folder outside dest is never walked and never removed: it is left alone."""
-    if not dest.is_dir() or dest.is_symlink():
+    if not dest.is_dir() or dest.is_symlink() or _is_junction(dest):
         return
     dirs_seen = []
     for d, dirs, names in os.walk(dest, topdown=True, followlinks=False):
@@ -130,6 +130,7 @@ def clear_links(dest):
 def stage(src, dest):
     """Link the model files in src into dest. Returns (included paths, skipped paths)."""
     clear_links(dest)
+    src_root = Path(src).resolve()
     included, skipped, seen = [], [], set()
     for d, dirs, names in os.walk(src, topdown=True, followlinks=True):
         # Links are followed (the HF cache is links), but a folder reached twice, as through a link back up
@@ -139,16 +140,28 @@ def stage(src, dest):
             dirs.clear()
             continue
         seen.add(real)
+        kept = []
         for n in dirs:
             p = Path(d, n)
-            if p.is_symlink() and not _allowed_link(p.resolve(), Path(src).resolve()):
+            if p.is_symlink() or _is_junction(p):
+                if _allowed_link(p.resolve(), src_root):
+                    kept.append(n)
+                    continue
+                dir_rel = p.relative_to(src).as_posix()
+                if SKIP.search(dir_rel + "/"):
+                    continue  # a skipped tree: left out, not refused
                 raise LinkError(f"{p} links outside the model folder: {p.resolve()}")
+            kept.append(n)
+        dirs[:] = kept
         for n in names:
             full = Path(d, n)
             rel = full.relative_to(src).as_posix()
-            if full.is_symlink() and not _allowed_link(full.resolve(), Path(src).resolve()):
+            if SKIP.search(rel):
+                skipped.append(rel)
+                continue  # a skipped file: left out, not refused
+            if (full.is_symlink() or _is_junction(full)) and not _allowed_link(full.resolve(), src_root):
                 raise LinkError(f"{full} links outside the model folder: {full.resolve()}")
-            (skipped if SKIP.search(rel) else included).append(rel)
+            included.append(rel)
     included.sort()
     problems = unportable(included)
     if problems:

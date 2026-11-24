@@ -149,6 +149,14 @@ def _remember(repo_id, state):
         _handles[repo_id] = state
 
 
+def _forget(repo_id, handle):
+    """Forget a repo: remove its handle (best effort) and drop its state."""
+    with _lock:
+        with contextlib.suppress(Exception):
+            _get_session().remove_torrent(handle)
+        _handles.pop(repo_id, None)
+
+
 def _lookup_magnet(repo_id):
     """The repo's magnet, or None to fall back on Hugging Face. NO_SWARM is remembered so the site is
     asked once per process; an unreachable site raises instead, so it is retried next time."""
@@ -239,7 +247,7 @@ def _handle(repo_id, resume=None, magnet=None, where=None):
         case Unsafe() as refused:
             raise Unavailable(str(refused))  # a listing this client refused: same answer for every file
         case RepoState.NO_SWARM if magnet is None:
-            return None  # an answer about the API, not the index: a magnet still joins its swarm
+            raise Unavailable()  # an answer about the API, not the index: a magnet still joins its swarm
         case lt.torrent_handle() as h:
             if magnet is None or str(h.info_hashes().v1) == str(lt.parse_magnet_uri(magnet).info_hashes.v1):
                 return h
@@ -247,7 +255,7 @@ def _handle(repo_id, resume=None, magnet=None, where=None):
     if magnet is None:
         magnet = _lookup_magnet(repo_id)
         if magnet is None:
-            return None
+            raise Unavailable()
     atp, saved = _torrent_params(repo_id, magnet, resume, cache_list=not from_index)
     h = _get_session().add_torrent(atp)
     _wait_for_metadata(repo_id, h)
@@ -385,8 +393,6 @@ def swarm_files(repo_id, magnet=None, where=None):
     """
     with _setup_lock(repo_id):
         h = _handle(repo_id, magnet=magnet, where=where)
-        if h is None:
-            raise Unavailable()
         ti = h.torrent_file()
         fs = ti.files()
         return [(_relative(ti, i), fs.file_size(i)) for i in real_files(fs)]
@@ -396,24 +402,16 @@ def _revive_if_finished(repo_id, h, magnet):
     """Re-add a finished handle (with resume data, so nothing is re-hashed), only while no other fetch
     is using it; otherwise return h as-is. A "finished" torrent drops its web seed, so the next file
     never gets bytes."""
-    if h.status().state != lt.torrent_status.finished:
-        return h
-    # Wait for another fetch to flush its last file -- every counted fetch decrements in a finally, so
+    # Wait for other fetches to drain their last file -- every counted fetch decrements in a finally, so
     # this drains; the wait can take as long as its flush plus any wait behind the global flush lock.
     with _idle_cv:
-        while _active.get(repo_id):
+        while _active.get(repo_id) and h.status().state == lt.torrent_status.finished:
             _idle_cv.wait(5)
     if h.status().state != lt.torrent_status.finished:  # still: no other fetch revived it meanwhile
         return h
     resume = _resume_data(h)
-    with _lock:
-        with contextlib.suppress(Exception):
-            _get_session().remove_torrent(h)
-        _handles.pop(repo_id, None)
-    h = _handle(repo_id, resume, magnet=magnet)
-    if h is None:
-        raise Unavailable()
-    return h
+    _forget(repo_id, h)
+    return _handle(repo_id, resume, magnet=magnet)
 
 
 def _wait_for_download(h, i, size, stall_timeout):
@@ -432,52 +430,46 @@ def _wait_for_download(h, i, size, stall_timeout):
 
 
 def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=None):
-    counted = False
+    with _setup_lock(repo_id):
+        h = _handle(repo_id, magnet=magnet)
+        h = _revive_if_finished(repo_id, h, magnet)
+
+        ti = h.torrent_file()
+        i = _file_index(ti, filename)
+        if i is None:
+            raise NotInTorrent("not in the torrent")
+        fs = ti.files()
+        size = fs.file_size(i)
+        path = Path(h.status().save_path) / fs.file_path(i)
+        # Set all priorities in one call (all-skipped for a moment drops the web seed), from our own set:
+        # libtorrent applies them lazily, so reading them back across threads loses updates.
+        # Keep accumulating wanted files: from_pretrained fetches several files in parallel.
+        with _lock:
+            wanted = _wanted.setdefault(repo_id, set())
+            wanted.add(i)
+            h.prioritize_pieces(_pieces_for(ti, wanted))
+            # Counted only after the priorities are in place: an exception above
+            # must not leave a phantom in-flight fetch behind.
+            _active[repo_id] = _active.get(repo_id, 0) + 1
+
     try:
-        with _setup_lock(repo_id):
-            h = _handle(repo_id, magnet=magnet)
-            if h is None:
-                raise Unavailable()
-            h = _revive_if_finished(repo_id, h, magnet)
-
-            ti = h.torrent_file()
-            i = _file_index(ti, filename)
-            if i is None:
-                raise NotInTorrent("not in the torrent")
-            fs = ti.files()
-            size = fs.file_size(i)
-            path = Path(h.status().save_path) / fs.file_path(i)
-            # Set all priorities in one call (all-skipped for a moment drops the web seed), from our own set:
-            # libtorrent applies them lazily, so reading them back across threads loses updates.
-            # Keep accumulating wanted files: from_pretrained fetches several files in parallel.
-            with _lock:
-                wanted = _wanted.setdefault(repo_id, set())
-                wanted.add(i)
-                h.prioritize_pieces(_pieces_for(ti, wanted))
-                # Counted only after the priorities are in place: an exception above
-                # must not leave a phantom in-flight fetch behind.
-                _active[repo_id] = _active.get(repo_id, 0) + 1
-                counted = True
-
         _wait_for_download(h, i, size, stall_timeout)
         _flush_to_disk(h)
         return path
     except BaseException:
         # A failed fetch must not leave its file wanted forever: at priority 4 the
         # torrent never reaches "finished" again, which would disable the re-add path.
-        if counted:  # set only once h, ti and i exist, and _wanted[repo_id] exists
-            with _idle_cv:
-                wanted = _wanted[repo_id]
-                if i in wanted and _active.get(repo_id, 0) <= 1:
-                    wanted.discard(i)
-                    with contextlib.suppress(Exception):
-                        h.prioritize_pieces(_pieces_for(ti, wanted))
+        with _idle_cv:
+            wanted = _wanted[repo_id]
+            if i in wanted and _active.get(repo_id, 0) <= 1:
+                wanted.discard(i)
+                with contextlib.suppress(Exception):
+                    h.prioritize_pieces(_pieces_for(ti, wanted))
         raise
     finally:
-        if counted:
-            with _idle_cv:
-                _active[repo_id] -= 1
-                _idle_cv.notify_all()
+        with _idle_cv:
+            _active[repo_id] -= 1
+            _idle_cv.notify_all()
 
 
 PAD_DIR = ".pad"  # pad bytes a creator wrote out by hand, without attr=p to say so

@@ -162,8 +162,10 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
 
     sizes = {f["path"]: f["size"] for f in files}
 
+    last_piece_save = 0.0  # seconds since monotonic; piece boundaries save at most every few seconds
+
     def on_piece(path, offset, v1, roots, stream):
-        nonlocal partial
+        nonlocal partial, last_piece_save
         if offset >= sizes[path]:
             return  # the finished-file checkpoint follows; avoid an EOF Range request
         partial = {
@@ -175,7 +177,10 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
         }
         if blocks is not None:
             blocks.flush()
-        state.save_files(job, plen, have_proofs, done, name, partial=partial)
+        now = time.monotonic()
+        if now - last_piece_save >= 5.0:
+            last_piece_save = now
+            state.save_files(job, plen, have_proofs, done, name, partial=partial)
 
     def opener(path):
         if not piece_checkpoints:

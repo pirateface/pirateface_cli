@@ -156,7 +156,7 @@ def blocks_path(name=None):
 
 
 def clear_files(name=None):
-    """Remove file-boundary hashes without touching the lease or piece checkpoint."""
+    """Remove the saved piece checkpoint (the progress file and the block-hash sidecar). The lease is left alone."""
     _path(name, "files").unlink(missing_ok=True)
     blocks_path(name).unlink(missing_ok=True)
 
@@ -175,7 +175,10 @@ def _partial_checksum(partial):
 
 
 def load_progress(job, plen, proofs, name=None):
-    """Load completed files and the partial file; discard progress for a different job."""
+    """Load completed files and the partial file; discard anything that does not check out.
+
+    A checkpoint that cannot be trusted — wrong shape, a different job, a corrupt partial, missing block
+    hashes — is thrown away and the job rebuilds from scratch. Nothing here raises."""
     path = _path(name, "files")
     if not path.exists():
         return [], None
@@ -231,7 +234,10 @@ def load_progress(job, plen, proofs, name=None):
             raise ValueError("saved block hashes are incomplete")
         return done, partial
     except (OSError, KeyError, TypeError, ValueError) as e:
-        raise ValueError(f"could not use file checkpoint {path}: {e}; use --clear-progress to discard it") from e
+        with contextlib.suppress(OSError):
+            clear_files(name)
+        print(f"    Discarded unusable file checkpoint ({e}); rebuilding from scratch.")
+        return [], None
 
 
 def save_files(job, plen, proofs, done, name=None, partial=None):

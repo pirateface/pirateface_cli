@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pirateface import ui
 from pirateface._regex import COMMIT_ANY as COMMIT
-from pirateface._regex import REPO
+from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
 from pirateface.config import API, MAX_UPLOAD_BYTES, SEEDS
 from pirateface.seed import clients, hub, hybrid, package, proofs, user

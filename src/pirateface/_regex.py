@@ -12,3 +12,8 @@ REPO_STRICT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9
 # 40-character commit ids: lowercase-only (index mirror) and any case (submissions).
 COMMIT_LOWER = re.compile(r"[0-9a-f]{40}")
 COMMIT_ANY = re.compile(r"[0-9a-fA-F]{40}")
+
+# File-shape regexes for the seed flow.
+WEIGHT = re.compile(r"\.(safetensors|gguf|onnx|bin|pt|pth|ckpt|mlx|npz)$", re.IGNORECASE)  # as the site keys a quant
+SHARD = re.compile(r"-\d{5}-of-(\d{5})\.gguf$")
+EXTRA = re.compile(r"(?:^|/)(?:mmproj|imatrix|mtp|dspark)(?=[-_.])", re.IGNORECASE)  # GGUF extras, not quants

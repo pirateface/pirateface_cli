@@ -2,18 +2,16 @@
 (submit.py). --hf-cache does that for the whole Hugging Face cache (cache.py). Local files are only read, never changed."""
 
 import os
-import re
 import sys
 from pathlib import Path
 
+from pirateface._regex import WEIGHT
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
 from pirateface.index import seeding as index_seeding
 from pirateface.seed import clients, package, submit, upgrade, user
 from pirateface.seed.per_file.command import seed_model, update_all
 from pirateface.seed.user import SeedError
-
-WEIGHT = re.compile(r"\.(safetensors|gguf|onnx|bin|pt|pth|ckpt|mlx|npz)$", re.IGNORECASE)  # as the site keys a quant
 
 
 def local_copy(repo, revision, download):

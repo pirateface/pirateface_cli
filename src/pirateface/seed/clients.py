@@ -12,6 +12,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from pirateface._http import request as _http_request
+
 HELP = (
     "Transmission: its remote access (RPC) must be on (TR_HOST, TR_AUTH=user:pass). "
     "qBittorrent: the Web UI must be on (QBT_URL, QBT_USER, QBT_PASS)."
@@ -38,7 +40,7 @@ class Transmission:
         body = json.dumps({"method": method, "arguments": args}).encode()
         for _ in range(2):
             try:
-                req = urllib.request.Request(self.url, body, self.headers)
+                req = _http_request(self.url, headers=self.headers, data=body)
                 with urllib.request.urlopen(req, timeout=30) as r:
                     out = json.load(r)
                 if out.get("result") != "success":
@@ -123,7 +125,7 @@ class QBittorrent:
     def call(self, path, form=None, body=None, content_type=None, text=True):
         if form is not None:
             body = urllib.parse.urlencode(form).encode()
-        req = urllib.request.Request(self.base + "/api/v2/" + path, body)
+        req = _http_request(self.base + "/api/v2/" + path, data=body)
         if content_type:
             req.add_header("Content-Type", content_type)
         with self.op.open(req, timeout=30) as r:

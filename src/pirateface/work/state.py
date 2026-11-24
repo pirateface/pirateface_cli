@@ -156,7 +156,7 @@ def blocks_path(name=None):
 
 
 def clear_files(name=None):
-    """Remove file-boundary hashes without touching the lease or piece checkpoint."""
+    """Remove the saved piece checkpoint (the progress file and the block-hash sidecar). The lease is left alone."""
     _path(name, "files").unlink(missing_ok=True)
     blocks_path(name).unlink(missing_ok=True)
 

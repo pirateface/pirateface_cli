@@ -59,20 +59,30 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
     try:
         plen = hybrid.piece_length(total)
         saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
-        with proofs.sidecar(state.blocks_path(name)) as blocks:
-            try:
-                data, manifest, infohash = build.build(job, key, trackers, name, blocks, max_download_rate, saved=saved)
-            except (OSError, ValueError, RuntimeError) as e:
-                # A checkpoint that does not check out (corrupt block hashes, an unrestorable SHA-256 state)
-                # is discarded rather than aborting the run: rebuild from scratch.
-                print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")
-                state.clear_files(name)
+
+        def _attempt(saved_checkpoint):
+            with proofs.sidecar(state.blocks_path(name)) as blocks:
                 data, manifest, infohash = build.build(
-                    job, key, trackers, name, blocks, max_download_rate, saved=([], None)
+                    job, key, trackers, name, blocks, max_download_rate, saved=saved_checkpoint
                 )
-            if len(data) > MAX_UPLOAD_BYTES:
-                raise user.SeedError("the .torrent is over the 3 MB upload limit")
-            block_proofs = proofs.answer(key, data, blocks)
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise user.SeedError("the .torrent is over the 3 MB upload limit")
+                block_proofs = proofs.answer(key, data, blocks)
+                return data, manifest, infohash, block_proofs
+
+        try:
+            data, manifest, infohash, block_proofs = _attempt(saved)
+        except (OSError, ValueError, RuntimeError) as e:
+            # A checkpoint that does not check out (corrupt block hashes, an unrestorable SHA-256 state)
+            # is discarded rather than aborting the run: rebuild from scratch. A fresh build's failure
+            # is not a checkpoint failure, so it propagates.
+            if not any(saved):
+                raise
+            print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")
+            # The sidecar is closed by _attempt's `with` block before this unlinks it, so clearing
+            # files cannot leave an open handle pointing at an unlinked path.
+            state.clear_files(name)
+            data, manifest, infohash, block_proofs = _attempt(([], None))
     except WorkUnreachable:
         raise
     except (WorkError, user.SeedError) as e:

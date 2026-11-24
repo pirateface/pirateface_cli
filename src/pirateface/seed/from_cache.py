@@ -18,7 +18,7 @@ from pirateface.seed.per_file.command import seed_model
 from pirateface.seed.user import SeedError
 
 SHA256 = re.compile(r"[0-9a-fA-F]{64}")
-REPO_LINE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(?:\s|$)")
+from pirateface._regex import REPO_LINE
 
 
 @dataclass

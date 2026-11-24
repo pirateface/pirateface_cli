@@ -5,7 +5,9 @@ import json
 import os
 import urllib.parse
 import urllib.request
-from importlib.metadata import version
+
+from pirateface._http import request as _http_request
+from pirateface._http import user_agent as _user_agent
 
 
 class _SameHostAuth(urllib.request.HTTPRedirectHandler):
@@ -24,14 +26,14 @@ urlopen = urllib.request.build_opener(_SameHostAuth).open
 
 def headers():
     """Headers for a request to Hugging Face: pf's User-Agent, and HF_TOKEN as a bearer token when set."""
-    h = {"User-Agent": f"pirateface/{version('pirateface')}"}
+    h = {"User-Agent": _user_agent()}
     if os.environ.get("HF_TOKEN"):
         h["Authorization"] = "Bearer " + os.environ["HF_TOKEN"]
     return h
 
 
 def _get(url):
-    with urlopen(urllib.request.Request(url, headers=headers()), timeout=30) as r:
+    with urlopen(_http_request(url, headers=headers()), timeout=30) as r:
         return json.load(r)
 
 

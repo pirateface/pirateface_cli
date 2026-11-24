@@ -17,8 +17,9 @@ from pirateface.seed.per_file.command import seed_model
 from pirateface.seed.user import SeedError
 
 TERMS_VERSION = "2026-09-18.2"
-REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
-COMMIT = re.compile(r"[0-9a-fA-F]{40}")
+from pirateface._regex import COMMIT_ANY as COMMIT
+from pirateface._regex import REPO
+
 UPGRADE = "uvx -p 3.13 --from pirateface@latest pf ..., or pipx upgrade pirateface, or pip install -U pirateface"
 
 

@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from importlib.metadata import version
 
+from pirateface._http import request as _http_request
 from pirateface.config import API, flag
 
 
@@ -63,13 +64,7 @@ _opener = urllib.request.build_opener(_NoRedirects())
 
 def request(url, timeout, *, method=None, headers=None, data=None):
     """One way to talk to the site: every request carries `User-Agent: pirateface/<version>`."""
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"User-Agent": f"pirateface/{VERSION}", **(headers or {})},
-        method=method,
-    )
-    return _opener.open(req, timeout=timeout)
+    return _opener.open(_http_request(url, headers=headers, data=data, method=method), timeout=timeout)
 
 
 def _site_answer(fetch):

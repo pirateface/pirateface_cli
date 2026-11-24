@@ -7,12 +7,12 @@ import sys
 import threading
 import time
 import urllib.parse
-from importlib.metadata import version
 from pathlib import Path
 
 import libtorrent as lt
 
 from pirateface import config, ui
+from pirateface._http import user_agent as _user_agent
 from pirateface.client import api
 from pirateface.listing import info_problems, unsafe_path
 
@@ -54,7 +54,7 @@ def _get_session():
         _session = lt.session(
             {
                 "listen_interfaces": config.LISTEN,
-                "user_agent": f"pirateface/{version('pirateface')}",
+                "user_agent": _user_agent(),
                 "alert_mask": lt.alert.category_t.all_categories if debug else lt.alert.category_t.storage_notification,
                 # The torrent goes "finished" between files and drops the web seed; reconnect in 2s, not 30s.
                 # Keep close_redundant_connections on: idle web seeds otherwise never request the next file.

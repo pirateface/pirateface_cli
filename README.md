@@ -23,18 +23,6 @@ pf restore PATH            # upload .torrent files to fix a listing whose magnet
 pf index [--sync]          # the cached magnet index: what it holds, and mirror the newest build
 ```
 
-`pf <command> --help` covers every flag. `pf seed` stores each model in `~/pirateface-seeds/<author>--<model>/` so same-named models from different authors do not collide, and leaves existing files in place.
-
-`pf work --max-size 100` takes only models up to 100 GiB; `pf work --once` takes one job and exits; `--max-download-rate 10` caps the Hugging Face stream at 10 MB/s. If interrupted, it saves the lease and file metadata privately under the Pirate Face config directory and resumes the job on the next run while the lease is active, restarting at the file that was cut off. Bytes are never saved to disk. Use a distinct `--name` per concurrent worker.
-
-`pf seed` variants: `--hf-cache` (every complete model in your HF cache, asking per model), `--from-cache` (seed listed torrents matching HF/Ollama cache files), `--update-trackers`, `--update-per-file`, `--no-per-file`, `--upgrade` (relist a v1-only torrent as hybrid; `--upgrade --mine` does it for every v1 torrent you submitted with a complete qBittorrent copy).
-
-`pf restore` takes `.torrent` files or a client folder, such as qBittorrent's `BT_backup` or Transmission's `torrents/`.
-
-`pf submit --direct --repo your-org/model FOLDER` publishes your own model that isn't on Hugging Face.
-
-`pf seed`, `submit`, `work` and `restore` ask once for your key from [pirateface.co/settings](https://pirateface.co/settings). `pf seed --from-cache` asks only after you choose a match.
-
 ## When Pirate Face is down
 
 The site's magnet index lists every model's magnet as a weekly torrent, mirrored into `$PF_CACHE/index/shards/`. When Pirate Face cannot be reached, a listed model in that copy still downloads: checked against the Hugging Face fingerprint first, and when Hugging Face cannot answer, against the torrent's own piece hashes via the infohash the shard commits to. A model not listed, a torrent that carries only some files, an unreadable removals list, or a download with no fingerprint falls back to Hugging Face, with the reason printed.

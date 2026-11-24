@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pirateface import config
+from pirateface._regex import COMMIT_ANY as _HASH
 from pirateface._regex import COMMIT_LOWER as _COMMIT
 from pirateface._regex import REPO_STRICT as _REPO
 from pirateface.client import api, torrent
@@ -29,7 +30,6 @@ from pirateface.index import FILE, INDEX_REPO
 # The web seed in an index magnet is a URL libtorrent may fetch pieces from, so only the site's own (or
 # the configured mirror's) host is accepted: a shard cannot point a lookup at somebody else's server.
 WS_HOSTS = {"pirateface.co"}
-_HASH = re.compile(r"[0-9a-fA-F]{40}")
 _BTMH = re.compile(r"1220[0-9a-fA-F]{64}")
 
 # Carried in the package as the fallback for a copy that has never synced: the site names the current build,

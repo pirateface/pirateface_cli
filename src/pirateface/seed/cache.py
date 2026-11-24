@@ -1,16 +1,14 @@
 """pf seed --hf-cache: class every model in the Hugging Face cache as seed, submit or skip, then do it, asking per model."""
 
-import re
 import sys
 from pathlib import Path
 
+from pirateface._regex import EXTRA, SHARD, WEIGHT
 from pirateface.client import api
 from pirateface.config import API
 from pirateface.seed import command, hub, submit, user
 
 HOURLY_LIMIT = 200  # submissions per account per hour, enforced by the site
-SHARD = re.compile(r"-\d{5}-of-(\d{5})\.gguf$")
-EXTRA = re.compile(r"(?:^|/)(?:mmproj|imatrix|mtp|dspark)(?=[-_.])", re.IGNORECASE)  # GGUF extras, not quants
 
 
 def plan_cache():
@@ -83,7 +81,7 @@ def plan_cache():
         elif any(
             remote[p][0] not in {f["sha256"] for q in entry.get("quants") or [entry] for f in q["files"]}
             for p in remote
-            if command.WEIGHT.search(p) and not EXTRA.search(p) and (snap / p).exists()
+            if WEIGHT.search(p) and not EXTRA.search(p) and (snap / p).exists()
         ):
             yield row("submit", "a quant Pirate Face doesn't list yet", size)
         elif entry.get("revision") != rev:

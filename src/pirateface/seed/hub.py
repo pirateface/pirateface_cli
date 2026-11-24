@@ -4,24 +4,17 @@ import http.client
 import json
 import os
 import urllib.parse
-import urllib.request
 
+from pirateface._http import SAME_HOST_AUTH
+from pirateface._http import open as _http_open
 from pirateface._http import request as _http_request
 from pirateface._http import user_agent as _user_agent
 
 
-class _SameHostAuth(urllib.request.HTTPRedirectHandler):
-    """Follow redirects, but send the Hugging Face token only to the host it was meant for: LFS files
-    redirect to a CDN on another host, which needs no token."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        new = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new and urllib.parse.urlsplit(new.full_url)[:2] != urllib.parse.urlsplit(req.full_url)[:2]:
-            new.remove_header("Authorization")
-        return new
-
-
-urlopen = urllib.request.build_opener(_SameHostAuth).open
+def urlopen(prepared_request, timeout=30):
+    """Open a request against Hugging Face, following redirects but stripping the bearer token off any
+    cross-host redirect (LFS files redirect to a CDN, which needs no token)."""
+    return _http_open(prepared_request, timeout=timeout, policy=SAME_HOST_AUTH)
 
 
 def headers():

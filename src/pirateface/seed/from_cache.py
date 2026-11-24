@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from tqdm.auto import tqdm
 
+from pirateface._regex import REPO_LINE
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
 from pirateface.seed import clients, package, user
@@ -18,7 +19,6 @@ from pirateface.seed.per_file.command import seed_model
 from pirateface.seed.user import SeedError
 
 SHA256 = re.compile(r"[0-9a-fA-F]{64}")
-from pirateface._regex import REPO_LINE
 
 
 @dataclass

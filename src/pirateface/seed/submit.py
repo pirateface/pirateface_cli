@@ -10,6 +10,8 @@ import urllib.parse
 from pathlib import Path
 
 from pirateface import ui
+from pirateface._regex import COMMIT_ANY as COMMIT
+from pirateface._regex import REPO
 from pirateface.client import api
 from pirateface.config import API, MAX_UPLOAD_BYTES, SEEDS
 from pirateface.seed import clients, hub, hybrid, package, proofs, user
@@ -17,8 +19,6 @@ from pirateface.seed.per_file.command import seed_model
 from pirateface.seed.user import SeedError
 
 TERMS_VERSION = "2026-09-18.2"
-from pirateface._regex import COMMIT_ANY as COMMIT
-from pirateface._regex import REPO
 
 UPGRADE = "uvx -p 3.13 --from pirateface@latest pf ..., or pipx upgrade pirateface, or pip install -U pirateface"
 

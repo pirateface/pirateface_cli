@@ -103,10 +103,42 @@ def upgrade_one(qbt, key, repo, infohash=None, report=True):
     return seed_model(data, entry["save_path"], new_v1, verified=True, label=repo, report=report)
 
 
+# How many problems --upgrade --mine prints in full before collapsing the rest.
+MAX_PROBLEMS = 20
+
+
+def _upgrade_one_safe(qbt, key, row):
+    """(result, None) or (None, problem line). One torrent's qBittorrent OSError or client request error
+    must not stop the batch, so it is recorded as a problem and the loop moves on."""
+    try:
+        return upgrade_one(qbt, key, row["repo"], row["infohash"], report=False), None
+    except Exception as e:  # one client error must not stop the rest of the batch
+        return None, f"{row['repo']}: {e}"
+
+
+def _report_mine(done, already, upgraded, problems):
+    """The one layer block plus the capped problems list: the first MAX_PROBLEMS, then a count of the rest."""
+    rows = [
+        ("model", f"{done} upgraded, {already} already hybrid"),
+        ("per-file", f"{sum(r['added'] for r in upgraded)} added, {sum(r['skipped'] for r in upgraded)} skipped"),
+    ]
+    if problems:
+        rows.append(("could not", str(len(problems))))
+    nxt = "pf seed --upgrade" if done == 0 and already and not problems else None
+    ui.layer_block(rows, nxt)
+    if not problems:
+        return
+    print("    Not upgraded:")
+    for line in problems[:MAX_PROBLEMS]:
+        print(f"      {line}")
+    if len(problems) > MAX_PROBLEMS:
+        print(f"      ... and {len(problems) - MAX_PROBLEMS} more")
+
+
 def upgrade_mine():
     """Relist every v1 torrent this account submitted that has a complete copy in qBittorrent, in one
-    command. It keeps going on the ones that fail and prints them as one list at the end. Safe to rerun:
-    a torrent whose .torrent is hybrid already is skipped."""
+    command. It keeps going on the ones that fail and prints the first MAX_PROBLEMS as a list at the end.
+    Safe to rerun: a torrent whose .torrent is hybrid already is skipped."""
     key = user.load_key()
     qbt = _qbittorrent()
     mine = api.my_torrents(key)
@@ -118,24 +150,14 @@ def upgrade_mine():
     print(f"==> Upgrading your {len(mine)} listed v1 torrents")
     results, problems = [], []  # results: one upgrade_one() answer per model it did not fail on
     for row in mine:
-        try:
-            results.append(upgrade_one(qbt, key, row["repo"], row["infohash"], report=False))
-        except Exception as e:  # one client error must not stop the rest of the batch
-            problems.append(f"{row['repo']}: {e}")
+        result, problem = _upgrade_one_safe(qbt, key, row)
+        if problem:
+            problems.append(problem)
+        else:
+            results.append(result)
     upgraded = [r for r in results if r is not None]
     done, already = len(upgraded), len(results) - len(upgraded)
-    rows = [
-        ("model", f"{done} upgraded, {already} already hybrid"),
-        ("per-file", f"{sum(r['added'] for r in upgraded)} added, {sum(r['skipped'] for r in upgraded)} skipped"),
-    ]
-    if problems:
-        rows.append(("could not", str(len(problems))))
-    nxt = "pf seed --upgrade" if done == 0 and already and not problems else None
-    ui.layer_block(rows, nxt)
-    if problems:
-        print("    Not upgraded:")
-        for line in problems:
-            print(f"      {line}")
+    _report_mine(done, already, upgraded, problems)
 
 
 def replacement(qbt, t):

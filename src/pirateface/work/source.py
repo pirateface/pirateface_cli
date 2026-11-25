@@ -8,7 +8,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from pirateface._http import request as _http_request
+from pirateface._http import SAME_HOST_AUTH
+from pirateface._http import open_request as _http_open_request
 from pirateface.seed import hub
 from pirateface.work.errors import WorkError, WorkUnreachable
 
@@ -59,7 +60,7 @@ def _open(url, headers, path, offset=0):
     last = None
     for attempt in range(ATTEMPTS):
         try:
-            resp = hub.urlopen(_http_request(url, headers=headers), timeout=60)
+            resp = _http_open_request(url, 60, headers=headers, policy=SAME_HOST_AUTH)
         except urllib.error.HTTPError as e:
             if e.code not in WAIT_FOR and 400 <= e.code < 500:  # 401/403/404: retrying won't change it
                 raise WorkError(f"{path}: Hugging Face refused the request ({e.code})") from e

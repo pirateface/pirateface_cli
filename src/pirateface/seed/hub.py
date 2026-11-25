@@ -1,20 +1,12 @@
 """What Hugging Face says about a repo: commit, license and file fingerprints."""
 
 import http.client
-import json
 import os
 import urllib.parse
 
 from pirateface._http import SAME_HOST_AUTH
-from pirateface._http import open as _http_open
-from pirateface._http import request as _http_request
+from pirateface._http import request_json as _http_request_json
 from pirateface._http import user_agent as _user_agent
-
-
-def urlopen(prepared_request, timeout=30):
-    """Open a request against Hugging Face, following redirects but stripping the bearer token off any
-    cross-host redirect (LFS files redirect to a CDN, which needs no token)."""
-    return _http_open(prepared_request, timeout=timeout, policy=SAME_HOST_AUTH)
 
 
 def headers():
@@ -26,8 +18,7 @@ def headers():
 
 
 def _get(url):
-    with urlopen(_http_request(url, headers=headers()), timeout=30) as r:
-        return json.load(r)
+    return _http_request_json(url, 30, headers=headers(), policy=SAME_HOST_AUTH)[1]
 
 
 def hidden(path):

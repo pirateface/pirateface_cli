@@ -227,6 +227,13 @@ def _main():
         action="store_true",
         help="skip the prompt (every model downloads in full, needing a lot of disk)",
     )
+    f = sub.add_parser(
+        "find-model",
+        help="what listed model does this local file belong to (sha256)",
+        description="Hash a local file and print every listed model whose sha256 it matches, from the repos in the "
+        "Hugging Face cache. There is no reverse-hash endpoint on the site, so the search is bounded to the cache.",
+    )
+    f.add_argument("file", help="the local file to identify")
     args = p.parse_args()
 
     if args.cmd == "index":
@@ -241,6 +248,11 @@ def _main():
             except SeedError as e:
                 sys.exit(f"error: {e}")
         return _index(mirror, args.sync)
+
+    if args.cmd == "find-model":
+        from pirateface import find_model
+
+        return find_model.find(args.file)
 
     if args.cmd == "work":
         from pirateface import work

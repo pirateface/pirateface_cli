@@ -59,18 +59,22 @@ def run(args):
     except user.SeedError as e:
         sys.exit(f"error: {e}")
 
+    failures = 0
     for path in files:
         try:
             if path.stat().st_size > MAX_UPLOAD_BYTES:
                 print(f"too large (>3 MB): {path}")
+                failures += 1
                 continue
             data = path.read_bytes()
         except OSError as e:
             print(f"could not read {path}: {e.strerror or e}")
+            failures += 1
             continue
         data = _scrub(data)
         if data is None:
             print(f"skipped (not a valid .torrent): {path.name}")
+            failures += 1
             continue
         try:
             status, body = api.restore(key, data)
@@ -86,3 +90,6 @@ def run(args):
             sys.exit(f"error: {body.get('error', 'authentication failed')}")
         else:
             print(f"error ({status}): {path.name} - {body.get('error', 'request failed')}")
+            failures += 1
+    if failures:
+        sys.exit(f"error: {failures} of {len(files)} .torrent file(s) could not be restored")

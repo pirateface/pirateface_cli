@@ -50,7 +50,7 @@ def open_request(url, timeout, *, headers=None, policy, method=None, data=None):
     return open(request(url, headers=headers, data=data, method=method), timeout=timeout, policy=policy)
 
 
-def get_json(url, timeout, *, headers=None, policy, parse=json.loads, method=None, data=None):
+def request_json(url, timeout, *, headers=None, policy, parse=json.loads, method=None, data=None):
     """(HTTP status, parse(body)) of url. Raises whatever the opener raises."""
     with open_request(url, timeout, headers=headers, policy=policy, method=method, data=data) as r:
         return r.status, parse(r.read())

@@ -5,7 +5,7 @@ import os
 import urllib.parse
 
 from pirateface._http import SAME_HOST_AUTH
-from pirateface._http import get_json as _http_get_json
+from pirateface._http import request_json as _http_request_json
 from pirateface._http import user_agent as _user_agent
 
 
@@ -18,7 +18,7 @@ def headers():
 
 
 def _get(url):
-    return _http_get_json(url, 30, headers=headers(), policy=SAME_HOST_AUTH)[1]
+    return _http_request_json(url, 30, headers=headers(), policy=SAME_HOST_AUTH)[1]
 
 
 def hidden(path):

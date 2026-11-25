@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from importlib.metadata import version
 
 from pirateface._http import NO_REDIRECTS
-from pirateface._http import get_json as _http_get_json
 from pirateface._http import open_request as _http_open_request
+from pirateface._http import request_json as _http_request_json
 from pirateface.config import API, flag
 
 
@@ -128,7 +128,7 @@ def _get_json(path, timeout, key=None, parse=json.loads):
     an error status, or a body parse() rejects."""
     headers = None if key is None else {"Authorization": f"Bearer {key}"}
     with contextlib.suppress(Exception):
-        status, body = _http_get_json(f"{API}{path}", timeout, headers=headers, policy=NO_REDIRECTS, parse=parse)
+        status, body = _http_request_json(f"{API}{path}", timeout, headers=headers, policy=NO_REDIRECTS, parse=parse)
         return body if status < 400 else None
     return None
 
@@ -299,7 +299,7 @@ def post(key, path, data, timeout, content_type="application/json", parse=json.l
     one, by default)."""
     headers = {"Authorization": f"Bearer {key}", "Content-Type": content_type}
     try:
-        return _http_get_json(
+        return _http_request_json(
             f"{API}{path}", timeout, headers=headers, policy=NO_REDIRECTS, method="POST", data=data, parse=parse
         )
     except urllib.error.HTTPError as e:

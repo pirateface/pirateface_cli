@@ -154,9 +154,16 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
             ui.aligned([("listed", f"{API}/{job['repoId']}"), ("infohash", infohash)])
         return True
     if status == 200:
-        # The site answered 200 but not with a listing: keep the checkpoint and treat the job as refused.
+        # The site answered 200 but not with a listing: a refused job. Release the lease and clear the
+        # checkpoint, as the other refused paths do, so the next poll can take the next job; keeping the
+        # checkpoint would re-submit the refused lease forever.
+        site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+        state.clear(name, files=True)
         print(f"    Not listed (unexpected 200 body): {answer!r}")
         return False
+    # A refused job: clear the checkpoint and release the lease, so the next poll can take the next job
+    # instead of holding this one for the lease's 10-minute lapse.
+    site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
     state.clear(name, files=True)
     print(f"    Not listed ({status}): {(answer or {}).get('error', 'request failed')}")
     return False

@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from pirateface._regex import WEIGHT
+from pirateface._regex import COMMIT_ANY, REPO_STRICT, WEIGHT
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
 from pirateface.index import seeding as index_seeding
@@ -83,9 +83,9 @@ def seed_listed(repo, src, key, per_file=False):
 
 
 def seed(repo, folder=None, revision=None, per_file=False):
-    if not submit.REPO.fullmatch(repo):
+    if not REPO_STRICT.fullmatch(repo):
         raise SeedError("the repo must look like author/model")
-    if revision and not submit.COMMIT.fullmatch(revision):
+    if revision and not COMMIT_ANY.fullmatch(revision):
         raise SeedError("--revision must be a full 40-character commit ID")
     if folder and not Path(folder).is_dir():
         raise SeedError(f"{folder} is not a folder")

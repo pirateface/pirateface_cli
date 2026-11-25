@@ -260,9 +260,15 @@ def _main():
     from huggingface_hub import snapshot_download
 
     from pirateface import ui
+    from pirateface._regex import REPO_STRICT
 
+    if not REPO_STRICT.fullmatch(args.repo_id):
+        sys.exit("error: the repo must look like author/model")
     if args.hf_first:
         os.environ["PF_HF_FIRST"] = "1"
-    path = snapshot_download(args.repo_id, revision=args.revision, local_dir=args.local_dir)
+    try:
+        path = snapshot_download(args.repo_id, revision=args.revision, local_dir=args.local_dir)
+    except Exception as e:  # not an OSError-only path: huggingface_hub raises httpx2 errors
+        sys.exit(f"error: {e}")
     ui.download_summary()
     print(path)

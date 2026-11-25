@@ -131,7 +131,7 @@ def run(args):
         elif args.from_cache:
             from pirateface.seed import from_cache
 
-            from_cache.seed_from_cache(args.per_file)
+            from_cache.seed_from_cache(args.per_file, args.comfyui)
         elif args.upgrade:
             if args.repo_id:
                 upgrade.rebuild(args.repo_id)

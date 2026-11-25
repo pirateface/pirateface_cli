@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from importlib.metadata import version
 
 from pirateface._http import NO_REDIRECTS
-from pirateface._http import open as _http_open
-from pirateface._http import request as _http_request
+from pirateface._http import get_json as _http_get_json
+from pirateface._http import open_request as _http_open_request
 from pirateface.config import API, flag
 
 
@@ -81,9 +81,7 @@ def _mark_down():
 def request(url, timeout, *, method=None, headers=None, data=None):
     """One way to talk to the site: every request carries `User-Agent: pirateface/<version>`, and no
     redirect is ever followed (a credential is never carried to another host)."""
-    return _http_open(
-        _http_request(url, headers=headers, data=data, method=method), timeout=timeout, policy=NO_REDIRECTS
-    )
+    return _http_open_request(url, timeout, headers=headers, policy=NO_REDIRECTS, method=method, data=data)
 
 
 def _site_answer(fetch):
@@ -130,8 +128,8 @@ def _get_json(path, timeout, key=None, parse=json.loads):
     an error status, or a body parse() rejects."""
     headers = None if key is None else {"Authorization": f"Bearer {key}"}
     with contextlib.suppress(Exception):
-        status, body = _get(f"{API}{path}", timeout, headers=headers)
-        return parse(body) if status < 400 else None
+        status, body = _http_get_json(f"{API}{path}", timeout, headers=headers, policy=NO_REDIRECTS, parse=parse)
+        return body if status < 400 else None
     return None
 
 
@@ -301,8 +299,9 @@ def post(key, path, data, timeout, content_type="application/json", parse=json.l
     one, by default)."""
     headers = {"Authorization": f"Bearer {key}", "Content-Type": content_type}
     try:
-        with request(f"{API}{path}", timeout, method="POST", headers=headers, data=data) as r:
-            return r.status, parse(r.read())
+        return _http_get_json(
+            f"{API}{path}", timeout, headers=headers, policy=NO_REDIRECTS, method="POST", data=data, parse=parse
+        )
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.load(e)

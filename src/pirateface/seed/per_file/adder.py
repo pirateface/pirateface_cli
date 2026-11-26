@@ -8,6 +8,7 @@ from pathlib import Path
 from pirateface.client import api
 from pirateface.config import SEEDS
 from pirateface.seed import package
+from pirateface.seed.user import SeedError
 
 TRACKER_WAIT = 0.5  # seconds between retries of a freshly added per-file torrent
 TRACKER_TRIES = 3  # a 404 on its hash right after torrents/add is the add still registering
@@ -47,7 +48,11 @@ class Adder:
                     self.had.add(h)
                 elif h not in self.added and self.add_file(entry, path, verified, label):
                     self.added.add(h)
-            except Exception as e:  # one file's failure must not stop the rest of the batch
+            # One file's failure must not stop the rest of the batch. The paths here raise OSError (disk,
+            # network), ValueError/KeyError/TypeError (a malformed answer or name), RuntimeError (the torrent
+            # client), or the seed package's own errors (LinkError, SeedError); anything else means a bug,
+            # not a bad file, and is allowed to fail the run.
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError, package.LinkError, SeedError) as e:
                 print(f"    Skipped {label or path.name}: {e}")
 
     def add_file(self, entry, path, verified, label=None):

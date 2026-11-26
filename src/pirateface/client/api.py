@@ -1,13 +1,11 @@
 """Everything that talks to pirateface.co."""
 
-import atexit
 import contextlib
 import enum
 import functools
 import json
 import re
 import ssl
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -17,7 +15,10 @@ from importlib.metadata import version
 from pirateface._http import NO_REDIRECTS
 from pirateface._http import open_request as _http_open_request
 from pirateface._http import request_json as _http_request_json
-from pirateface.config import API, flag
+from pirateface.client import rescue as _rescue
+from pirateface.config import API
+
+request_rescue = _rescue.request_rescue
 
 
 class Status(enum.Enum):
@@ -334,33 +335,3 @@ def my_torrents(key):
 def restore(key, data):
     """POST raw .torrent bytes to /api/torrents/restore. Returns (HTTP status, JSON answer)."""
     return post(key, "/api/torrents/restore", data, 60, "application/x-bittorrent")
-
-
-_rescues = []
-
-
-def _send_rescue(repo_id):
-    with contextlib.suppress(Exception):
-        request(
-            f"{API}/api/rescue",
-            10,
-            method="POST",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps({"repoId": repo_id}).encode(),
-        ).close()
-
-
-def request_rescue(repo_id):
-    """Ask Pirate Face to add a model it doesn't have yet, in the background."""
-    if flag("PF_NO_RESCUE"):
-        return False
-    t = threading.Thread(target=_send_rescue, args=(repo_id,), daemon=True)
-    t.start()
-    _rescues.append(t)
-    return True
-
-
-@atexit.register
-def _wait_for_rescues():
-    for t in _rescues:
-        t.join(timeout=2)

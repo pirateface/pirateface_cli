@@ -1,5 +1,6 @@
 """pf work: the loop. Takes a job, builds it, submits it; --once takes one job and exits."""
 
+import contextlib
 import sys
 import time
 from dataclasses import dataclass, field
@@ -98,8 +99,8 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
             ("leased", job["repoId"]),
         ]
     )
-    state.save(job, name)
     try:
+        state.save(job, name)
         plen = hybrid.piece_length(total)
         saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
 
@@ -137,7 +138,8 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         # unrestorable SHA-256 state rebuilt only to fail again) is not a lease failure: give the lease
         # back so the site can offer the row again, keep the checkpoint for the next run, and let the
         # caller turn it into a clean message instead of a traceback.
-        site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+        with contextlib.suppress(Exception):
+            site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
         raise
     status, answer = site.complete(key, job["leaseId"], data, manifest, block_proofs)
     if site.transient(status):

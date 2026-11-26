@@ -116,10 +116,11 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
 
         try:
             data, manifest, infohash, block_proofs = _attempt(saved)
-        except (OSError, ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError) as e:
             # A checkpoint that does not check out (corrupt block hashes, an unrestorable SHA-256 state)
-            # is discarded rather than aborting the run: rebuild from scratch. A fresh build's failure
-            # is not a checkpoint failure, so it propagates.
+            # is discarded rather than aborting the run: rebuild from scratch. A save failure (OSError) is
+            # not a checkpoint failure: it passes straight through to the local-failure arm, which releases
+            # the lease but keeps the checkpoint for the next run.
             if not any(saved):
                 raise
             print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")

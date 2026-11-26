@@ -1,9 +1,6 @@
 """pf submit, and the half of pf seed that shares a model Pirate Face doesn't list: package, check, seed, submit."""
 
-import base64
-import contextlib
 import hashlib
-import json
 import os
 import re
 import urllib.parse
@@ -13,12 +10,11 @@ from pirateface import ui
 from pirateface._regex import COMMIT_ANY as COMMIT
 from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
-from pirateface.config import API, MAX_UPLOAD_BYTES, SEEDS
+from pirateface.config import API, SEEDS
 from pirateface.seed import clients, hub, hybrid, package, proofs, user
 from pirateface.seed.per_file.command import seed_model
+from pirateface.seed.submission import Answers, evidence_for, print_dry_run, request_body
 from pirateface.seed.user import SeedError
-
-TERMS_VERSION = "2026-09-18.2"
 
 UPGRADE = "uvx -p 3.13 --from pirateface@latest pf ..., or pipx upgrade pirateface, or pip install -U pirateface"
 
@@ -40,20 +36,6 @@ def start_seeding(repo, data, save_dir, v1, v2, name, trackers, torrent_path, wa
         if wait:
             user.ask("    Press Enter once it says Seeding. ")
     print("    Keep it running. BitTorrent shows your IP address to other peers.")
-
-
-class Answers:
-    """Prompts during a submission. A dry run never asks: it records what a real run would ask for."""
-
-    def __init__(self, dry_run):
-        self.dry_run, self.skipped = dry_run, []
-
-    def ask(self, prompt, what):
-        if self.dry_run:
-            self.skipped.append(what)
-            print(f"    (dry run: a real run asks for the {what} here)")
-            return None
-        return user.ask(prompt)
 
 
 def check_web_seed(url):
@@ -148,50 +130,6 @@ def choose_license(repo, hf_license, sums, licenses, answers):
             "download it into the model folder and rerun"
         )
     return lic
-
-
-def evidence_for(repo, revision, lic, match, direct, command, answers):
-    if match:
-        return (
-            f"Source: https://huggingface.co/{repo} at revision {revision}. License per model card: {lic}. "
-            f"{match} Hugging Face LFS files at that revision are in this torrent, and their SHA-256 hashes match "
-            f"the local copy (checked by {command})."
-        )
-    if direct:
-        return f"Direct listing: submitted directly to Pirate Face (not on Hugging Face). License: {lic}."
-    print("    Where did this copy come from? Links, license proof, and why it's gone from Hugging Face if it is.")
-    evidence = answers.ask("    Evidence: ", "evidence")
-    if evidence is not None and len(evidence) < 30:
-        raise SeedError("evidence needs at least 30 characters")
-    return evidence
-
-
-def request_body(repo, revision, lic, evidence, sums, data, v1, v2, readme, web_seed):
-    """The POST /api/community-torrents body."""
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise SeedError("the .torrent is over the 3 MB upload limit")
-    body = {
-        "repoId": repo,
-        "revision": revision,
-        "magnet": package.magnet(v1, v2),  # the site adds the trackers
-        "license": lic,
-        "evidence": evidence,
-        "manifest": [{"path": p, "sha256": h} for p, h in sorted(sums.items())],
-        "torrent": base64.b64encode(data).decode(),  # lets the magnet work with no peer online
-        "submissionTermsVersion": TERMS_VERSION,
-        "redistributionConfirmed": True,
-        "accuracyConfirmed": True,
-        "reviewAcknowledged": True,
-        "privacyAcknowledged": True,
-        "termsAccepted": True,
-    }
-    # README.md is the model card. Pirate Face shows it for models that aren't on Hugging Face.
-    if readme.is_file() and readme.stat().st_size <= 200_000:
-        with contextlib.suppress(UnicodeDecodeError):
-            body["readme"] = readme.read_bytes().decode("utf-8")  # as is: the site checks it against the manifest
-    if web_seed:
-        body["webSeed"] = web_seed
-    return body
 
 
 def confirm_and_post(repo, src, key, body, lic, paths, out, torrent_path, proof=None):
@@ -290,20 +228,6 @@ def submit_new(
         confirm_and_post(repo, src, key, body, lic, paths, out, torrent_path, lambda: proofs.answer(key, data, blocks))
         if per_file:
             seed_model(data, save_dir, v1, verified=True)  # build_torrent just hashed every file
-
-
-def print_dry_run(body, data, v1, v2, torrent_path, skipped):
-    shown = dict(body, torrent=f"<{len(data)} bytes, base64>")
-    if "readme" in shown:
-        shown["readme"] = f"<README.md, {len(body['readme'])} characters>"
-    print("\n==> Dry run: nothing added to a torrent client, nothing submitted")
-    print(f"    v1 infohash  {v1}")
-    print(f"    v2 infohash  {v2}")
-    print(f"    torrent      {torrent_path}")
-    print(f"    POST {API}/api/community-torrents")
-    print(json.dumps(shown, indent=2))
-    if skipped:
-        print(f"    A real run asks for: {', '.join(skipped)}")
 
 
 def submit(args):

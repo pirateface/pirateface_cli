@@ -1,5 +1,6 @@
 """pf work: the loop. Takes a job, builds it, submits it; --once takes one job and exits."""
 
+import contextlib
 import sys
 import time
 from dataclasses import dataclass, field
@@ -98,8 +99,8 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
             ("leased", job["repoId"]),
         ]
     )
-    state.save(job, name)
     try:
+        state.save(job, name)
         plen = hybrid.piece_length(total)
         saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
 
@@ -131,6 +132,14 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
     except (WorkError, user.SeedError) as e:
         state.clear(name, files=not isinstance(e, LeaseLost))
         site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+        raise
+    except (OSError, RuntimeError):
+        # A local failure in the job path (an unreadable file, a full disk on the checkpoint, an
+        # unrestorable SHA-256 state rebuilt only to fail again) is not a lease failure: give the lease
+        # back so the site can offer the row again, keep the checkpoint for the next run, and let the
+        # caller turn it into a clean message instead of a traceback.
+        with contextlib.suppress(Exception):
+            site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
         raise
     status, answer = site.complete(key, job["leaseId"], data, manifest, block_proofs)
     if site.transient(status):
@@ -272,6 +281,10 @@ def _step(args, loop, key, trackers, max_bytes, max_download_rate):
             sleep=backoff.seconds,
             stderr=True,
         )
+    except (OSError, RuntimeError) as e:
+        # A local failure (disk full, unreadable files): the lease is already released, the checkpoint is
+        # kept; a traceback would only hide the cause. Run `pf work` again once the machine is back.
+        sys.exit(f"error: {e}")
     except WorkError as e:
         if args.once:
             sys.exit(f"error: {e}")

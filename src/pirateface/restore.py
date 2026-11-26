@@ -80,6 +80,18 @@ def run(args):
             status, body = api.restore(key, data)
         except (OSError, http.client.HTTPException) as e:
             sys.exit(f"error: could not reach {API} ({getattr(e, 'reason', e)}); nothing more was sent")
+        except ValueError as e:
+            # The site answered with something the client cannot read (an empty or non-JSON body): a
+            # per-file failure, not a crash, so the rest of the batch still runs.
+            print(f"error (response unreadable): {path.name} - {e}")
+            failures += 1
+            continue
+        if not isinstance(body, dict):
+            # The site answered with a body of the wrong shape: treat it as unreadable rather than
+            # crashing on body.get() below.
+            print(f"error (unexpected response): {path.name}")
+            failures += 1
+            continue
         if status == 200:
             print(f"restored: {path.name} -> {body.get('repoId', '')} ({body.get('infohash', '')})")
         elif status == 404:

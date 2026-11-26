@@ -1,6 +1,7 @@
 import atexit
 import contextlib
 import enum
+import os
 import shutil
 import threading
 import time
@@ -129,7 +130,12 @@ def _torrent_params(repo_id, magnet, resume, cache_list=True):
     if not saved.exists() and cache_list:
         _save_torrent_file(repo_id, saved, str(atp.info_hashes.v1))
     if saved.exists():
-        atp.ti = lt.torrent_info(str(saved))
+        try:
+            atp.ti = lt.torrent_info(str(saved))
+        except RuntimeError:
+            # A cache file a crash or a failed write left behind is never the copy this build names:
+            # drop it and let the file list come from a peer, as if there were no cache.
+            saved.unlink(missing_ok=True)
     if resume:
         ra = lt.read_resume_data(resume)
         atp.have_pieces = ra.have_pieces
@@ -164,11 +170,22 @@ def _check_listing(repo_id, h, saved):
         raise
 
 
+def _atomic_write(path, data):
+    """Write data to path atomically, so a crash or a full disk leaves no half-written .torrent behind."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.part")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _cache_file_list(saved, h):
     """Save the file list a peer sent, so a magnet alone needs a live peer only the first time."""
     if not saved.exists():
-        saved.parent.mkdir(parents=True, exist_ok=True)
-        saved.write_bytes(lt.bencode({"info": lt.bdecode(h.torrent_file().info_section())}))
+        _atomic_write(saved, lt.bencode({"info": lt.bdecode(h.torrent_file().info_section())}))
 
 
 def _handle(repo_id, resume=None, magnet=None, where=None):
@@ -253,8 +270,7 @@ def _save_torrent_file(repo_id, saved, infohash):
         # swarm: the magnet still works and the file list can come from peers.
         return
     if str(ti.info_hashes().v1) == infohash:
-        saved.parent.mkdir(parents=True, exist_ok=True)
-        saved.write_bytes(data)
+        _atomic_write(saved, data)
 
 
 def _show_status(repo_id, h, every=0.5, recent=3.0):

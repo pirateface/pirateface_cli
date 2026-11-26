@@ -213,7 +213,7 @@ def _resume_once(key, trackers, name, saved, max_bytes=None, max_download_rate=N
     except Oversize:
         state.clear(name)
         raise
-    status, answer = site.renew(key, saved["leaseId"])
+    status, answer = site.renew(key, saved["leaseId"], name=name)
     if status in {401, 403, 404, 410}:
         state.clear(name, files=False)  # keep finished-file and piece checkpoints for a later lease
         reason = "expired" if status == 410 else f"could not be renewed ({status})"

@@ -230,8 +230,8 @@ def _main():
     f = sub.add_parser(
         "find-model",
         help="what listed model does this local file belong to (sha256)",
-        description="Hash a local file and print every listed model whose sha256 it matches, from the repos in the "
-        "Hugging Face cache. There is no reverse-hash endpoint on the site, so the search is bounded to the cache.",
+        description="Hash a local file and print every listed model whose sha256 it matches, via the site's "
+        "batched /api/files/by-sha256 lookup. Only files the site lists (and that are at least 1 MiB) can match.",
     )
     f.add_argument("file", help="the local file to identify")
     args = p.parse_args()

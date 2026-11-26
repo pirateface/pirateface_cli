@@ -1,19 +1,23 @@
-"""Client-side sha256 -> model lookup: what listed model does this local file belong to?
+"""sha256 -> listed model lookup: what does this file hash to, and which listed models hold it?
 
-There is no reverse-hash endpoint on the site, so this walks the repos in the Hugging Face cache, asks the
-site what each listing holds, and matches the hash of the file the user named. It answers nothing about a
-file that is not in the cache or that the site does not list -- the prototype's honest limit, documented in
-the PR.
+The site indexes listed uploads by SHA-256 (>= 1 MiB, Hugging Face backed) behind a batched
+POST /api/files/by-sha256 endpoint, so the whole lookup is one request. A file the site does not
+list (or is too small to identify honestly by SHA-256) reports no match -- that is the honest limit,
+and never a guess.
 """
 
 import hashlib
+import json
 import sys
+import urllib.error
 from pathlib import Path
 
-from pirateface._regex import REPO_STRICT
-from pirateface.client import api
+from pirateface._http import NO_REDIRECTS, request_json
+from pirateface.config import API
 
-MIN_FILE_SIZE = 1 << 20  # 1 MiB: tiny configs and tokenizers are too easy to mis-match by size alone
+MIN_FILE_SIZE = 1 << 20  # 1 MiB: tiny configs and tokenizers are too small to identify honestly by sha256
+BATCH_SIZE = 100  # the endpoint refuses batches larger than this
+TIMEOUT = 30
 
 
 def hash_file(path):
@@ -24,18 +28,56 @@ def hash_file(path):
     return h.hexdigest()
 
 
-def _cache_repos():
-    from huggingface_hub import constants
+def _batches(items, size):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
-    cache = Path(constants.HF_HUB_CACHE)
-    if not cache.is_dir():
-        return Path(constants.HF_HUB_CACHE), []
-    repos = []
-    for repo_dir in sorted(cache.glob("models--*")):
-        repo = repo_dir.name.removeprefix("models--").replace("--", "/", 1)
-        if REPO_STRICT.fullmatch(repo):
-            repos.append(repo)
-    return cache, repos
+
+def _lookup(digests):
+    """The listed rows for each sha256 in digests (at most BATCH_SIZE per request).
+
+    Returns ({digest: [rows]}, error_message). Rows are {repoId, infohash, path, length, root,
+    sha256} dicts. On a transport failure or an unreadable answer, the partial map is returned
+    with error_message set -- a failed batch is not a match.
+    """
+    rows_by_digest = {d: [] for d in digests}
+    error = None
+    for batch in _batches(digests, BATCH_SIZE):
+        payload = json.dumps({"hashes": batch}).encode()
+        try:
+            status, body = request_json(
+                f"{API}/api/files/by-sha256",
+                TIMEOUT,
+                policy=NO_REDIRECTS,
+                method="POST",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        except urllib.error.HTTPError as e:
+            error = f"the site refused the lookup (HTTP {e.code})"
+            return rows_by_digest, error
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            error = f"could not reach {API} ({e})"
+            return rows_by_digest, error
+        except json.JSONDecodeError as e:
+            error = f"the site's answer could not be read ({e})"
+            return rows_by_digest, error
+        if status != 200:
+            error = f"the site answered HTTP {status}"
+            return rows_by_digest, error
+        if not isinstance(body, dict):
+            error = "the site's answer was not a {hash: [rows]} map"
+            return rows_by_digest, error
+        for d in batch:
+            rows = body.get(d)
+            if isinstance(rows, list):
+                rows_by_digest[d] = [
+                    row for row in rows if isinstance(row, dict) and row.get("repoId") and row.get("path")
+                ]
+            else:
+                error = f"the site's answer was missing or malformed for {d}"
+                return rows_by_digest, error
+    return rows_by_digest, error
 
 
 def find(path, out=sys.stdout):
@@ -45,37 +87,25 @@ def find(path, out=sys.stdout):
         print(f"error: {path} is not a file", file=sys.stderr)
         return 1
     if path.stat().st_size < MIN_FILE_SIZE:
-        print(f"error: {path} is under {MIN_FILE_SIZE // (1 << 20)} MiB; too easy to mis-match", file=sys.stderr)
+        print(
+            f"error: {path} is under {MIN_FILE_SIZE // (1 << 20)} MiB; too small to identify by sha256", file=sys.stderr
+        )
         return 1
     digest = hash_file(path)
     print(f"hash: {digest}", file=sys.stderr)
 
-    cache, repos = _cache_repos()
-    if not cache.is_dir():
-        print(f"note: no Hugging Face cache at {cache}; checking nothing", file=sys.stderr)
-    if not repos:
-        print("note: no models in the Hugging Face cache to check", file=sys.stderr)
-
-    matches = []
-    failures = []
-    for repo in repos:
-        try:
-            found = api.listed(repo)
-        except Exception as e:
-            failures.append((repo, e))
-            continue
-        if not found:
-            continue
-        for p, (size, sha, _url) in found["files"].items():
-            if sha == digest:
-                matches.append((repo, p, found["commit"], size))
-                break
-
-    if not matches:
-        print("no listed model holds this file", file=sys.stderr)
-        if failures:
-            print(f"({len(failures)} lookups failed, e.g. {failures[0][0]}: {failures[0][1]})", file=sys.stderr)
+    found, error = _lookup([digest])
+    if error:
+        print(f"error: {error}", file=sys.stderr)
         return 1
-    for repo, p, commit, size in matches:
-        print(f"{repo}  {p}  ({size / 1e9:.2f} GB, {commit[:12]})", file=out)
+    rows = found[digest]
+    if not rows:
+        print("no listed model holds this file", file=sys.stderr)
+        return 1
+    for row in rows:
+        size = row.get("length")
+        size_s = f"{size / 1e9:.2f} GB" if isinstance(size, int) and size >= 0 else "?"
+        info = str(row.get("infohash") or "")
+        info_s = info[:12] if info else "?"
+        print(f"{row['repoId']}  {row['path']}  ({size_s}, {info_s})", file=out)
     return 0

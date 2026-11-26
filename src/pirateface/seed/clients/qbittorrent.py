@@ -46,15 +46,9 @@ class QBittorrent:
         return json.loads(self.call("torrents/info", timeout=timeout))
 
     def trackers(self, h, timeout=30):
-        data = json.loads(self.call("torrents/trackers?hash=" + h, timeout=timeout))
-        if not isinstance(data, list):
-            return []
-        urls = []
-        for x in data:
-            url = x.get("url") if isinstance(x, dict) else None
-            if url and "://" in url:
-                urls.append(url)
-        return urls
+        return [
+            x["url"] for x in json.loads(self.call("torrents/trackers?hash=" + h, timeout=timeout)) if "://" in x["url"]
+        ]
 
     def torrents_named(self, name):
         """(save folder, tracker URLs, file paths inside the torrent) of each torrent called name."""

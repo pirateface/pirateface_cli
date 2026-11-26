@@ -49,6 +49,15 @@ def matching_quant(repo, src):
     return best[0]["quant"] if best[0] and len(quants) > 1 and best[1] else None
 
 
+def superseded_nudge(v1):
+    """Print a nudge when this torrent is superseded on Pirate Face: the clean one-command switch.
+    Non-fatal by design: seeding still proceeds."""
+    status = api.torrent_status(v1)
+    if status and status.get("status") == "superseded" and status.get("supersededBy"):
+        print("    This torrent is superseded on Pirate Face. Switch to the replacement with:")
+        print("    pf seed --upgrade")
+
+
 def seed_listed(repo, src, key, per_file=False):
     """Seed the torrent Pirate Face already lists, with whatever files src has."""
     try:
@@ -72,6 +81,7 @@ def seed_listed(repo, src, key, per_file=False):
     trackers = api.trackers(key)
     data = package.with_trackers(data, trackers)
     name, v1, v2, single = package.info(data)
+    superseded_nudge(v1)
     out = Path(SEEDS, package.seeds_folder(repo, v1))
     save_dir = out / "files"
     have = package.link_existing(src, save_dir if single else save_dir / name, paths) if src else 0

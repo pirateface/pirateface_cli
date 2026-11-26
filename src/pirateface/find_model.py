@@ -71,9 +71,11 @@ def _lookup(digests):
         for d in batch:
             rows = body.get(d)
             if isinstance(rows, list):
-                rows_by_digest[d] = [
-                    row for row in rows if isinstance(row, dict) and row.get("repoId") and row.get("path")
-                ]
+                for row in rows:
+                    if not isinstance(row, dict) or not row.get("repoId") or not row.get("path"):
+                        error = f"the site's answer was malformed for {d}"
+                        return rows_by_digest, error
+                rows_by_digest[d] = rows
             else:
                 error = f"the site's answer was missing or malformed for {d}"
                 return rows_by_digest, error
@@ -86,12 +88,21 @@ def find(path, out=sys.stdout):
     if not path.is_file():
         print(f"error: {path} is not a file", file=sys.stderr)
         return 1
-    if path.stat().st_size < MIN_FILE_SIZE:
+    try:
+        size = path.stat().st_size
+    except OSError as e:
+        print(f"error: {path} is not a file ({e})", file=sys.stderr)
+        return 1
+    if size < MIN_FILE_SIZE:
         print(
             f"error: {path} is under {MIN_FILE_SIZE // (1 << 20)} MiB; too small to identify by sha256", file=sys.stderr
         )
         return 1
-    digest = hash_file(path)
+    try:
+        digest = hash_file(path)
+    except OSError as e:
+        print(f"error: {path} could not be read ({e})", file=sys.stderr)
+        return 1
     print(f"hash: {digest}", file=sys.stderr)
 
     found, error = _lookup([digest])

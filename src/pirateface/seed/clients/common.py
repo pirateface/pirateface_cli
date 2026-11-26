@@ -18,3 +18,23 @@ KEYED = re.compile(r"^https?://tracker\.pirateface\.co:6970/[0-9a-f]+/announce$"
 
 def is_pirateface(urls):
     return any(PIRATEFACE.match(u) for u in urls)
+
+
+def tracker_update_loop(torrents, mine, get_urls, mutate):
+    """The shared skeleton of the two clients' update_trackers: walk the torrents, and for each Pirate Face
+    torrent that lacks `mine`, let mutate(entry, urls) change its trackers; return (added, current, skipped,
+    changed) where changed holds the entries whose trackers were updated."""
+    added = current = skipped = 0
+    changed = []
+    for entry in torrents:
+        urls = get_urls(entry)
+        if not is_pirateface(urls):
+            skipped += 1
+            continue
+        if mine in urls:
+            current += 1
+            continue
+        mutate(entry, urls)
+        added += 1
+        changed.append(entry)
+    return added, current, skipped, changed

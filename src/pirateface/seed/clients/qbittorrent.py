@@ -11,7 +11,7 @@ import urllib.request
 import uuid
 
 from pirateface._http import request as _http_request
-from pirateface.seed.clients.common import KEYED, LoginRefused, is_pirateface
+from pirateface.seed.clients.common import KEYED, LoginRefused, tracker_update_loop
 
 
 class QBittorrent:
@@ -202,23 +202,17 @@ class QBittorrent:
             if self.ensure_announce_all()
             else ""
         )
-        added = current = skipped = 0
-        changed = []
-        for t in self.torrents():
+
+        def mutate(t, urls):
             h = t["hash"]
-            urls = self.trackers(h)
-            if not is_pirateface(urls):
-                skipped += 1
-                continue
-            if mine in urls:
-                current += 1
-                continue
             old = [u for u in urls if KEYED.match(u)]
             if old:
                 self.call("torrents/removeTrackers", {"hash": h, "urls": "|".join(old)})
             self.call("torrents/addTrackers", {"hash": h, "urls": mine})
-            added += 1
-            changed.append(h)
+
+        added, current, skipped, changed = tracker_update_loop(
+            self.torrents(), mine, lambda t: self.trackers(t["hash"]), mutate
+        )
         if changed:
-            self.call("torrents/reannounce", {"hashes": "|".join(changed)})
+            self.call("torrents/reannounce", {"hashes": "|".join(t["hash"] for t in changed)})
         return added, current, skipped, extra

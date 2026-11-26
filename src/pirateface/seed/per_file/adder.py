@@ -8,6 +8,7 @@ from pathlib import Path
 from pirateface.client import api
 from pirateface.config import SEEDS
 from pirateface.seed import package
+from pirateface.seed.user import SeedError
 
 TRACKER_WAIT = 0.5  # seconds between retries of a freshly added per-file torrent
 TRACKER_TRIES = 3  # a 404 on its hash right after torrents/add is the add still registering
@@ -35,17 +36,24 @@ class Adder:
         """found: local_files() of the model torrent whose v1 infohash is v1. label: the model, for a skip's message."""
         for path, root in found:
             self.asked += 1
-            entry = api.file_root(root)
-            if not entry:
-                continue
-            self.listed += 1
-            if all(s["infohash"] == v1 for s in entry["siblings"]):
-                continue  # only in this upload
-            h = entry["infohashV2"]
-            if h in self.known:
-                self.had.add(h)
-            elif h not in self.added and self.add_file(entry, path, verified, label):
-                self.added.add(h)
+            try:
+                entry = api.file_root(root)
+                if not entry:
+                    continue
+                self.listed += 1
+                if all(s["infohash"] == v1 for s in entry["siblings"]):
+                    continue  # only in this upload
+                h = entry["infohashV2"]
+                if h in self.known:
+                    self.had.add(h)
+                elif h not in self.added and self.add_file(entry, path, verified, label):
+                    self.added.add(h)
+            # One file's failure must not stop the rest of the batch. The paths here raise OSError (disk,
+            # network), ValueError/KeyError/TypeError (a malformed answer or name), RuntimeError (the torrent
+            # client), or the seed package's own errors (LinkError, SeedError); anything else means a bug,
+            # not a bad file, and is allowed to fail the run.
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError, package.LinkError, SeedError) as e:
+                print(f"    Skipped {label or path.name}: {e}")
 
     def add_file(self, entry, path, verified, label=None):
         name = entry["name"]  # from the first upload that had the file; can differ from yours

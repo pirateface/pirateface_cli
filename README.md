@@ -22,6 +22,7 @@ pf work                    # build torrents for queued model requests, streamed 
 pf restore PATH            # upload .torrent files to fix a listing whose magnet stalls
 pf index [--sync]          # the cached magnet index: what it holds, and mirror the newest build
 pf find-model FILE         # which listed models hold this file (sha256)
+pf dedupe                  # duplicate Hugging Face cache blobs (--apply to hardlink, default dry run)
 ```
 
 `pf work` builds torrents for queued model requests, streamed from Hugging Face into memory; no model bytes are saved to disk. Progress is saved in a private checkpoint (completed pieces plus the unfinished piece's SHA-256 state, or file boundaries when the native hasher is unavailable) and an interrupted run resumes it on the next run while the lease is still active; a new lease for the same model revision and files can also reuse it. Completed file checkpoints are retained when the native hasher is unavailable. A checkpoint that does not check out (corrupt, missing block hashes, a different job) is discarded automatically and the job rebuilds from scratch. Piece-boundary checkpoints are saved at most every few seconds. `pf work --clear-progress` discards the saved hashes (keeping the lease), and `--name` keeps concurrent workers' checkpoints apart.

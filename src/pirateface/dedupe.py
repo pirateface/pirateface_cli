@@ -63,6 +63,14 @@ def _per_repo_blobs(root):
     return seen
 
 
+def _same_file(a, b):
+    try:
+        sa, sb = a.stat(), b.stat()
+        return sa.st_ino == sb.st_ino and sa.st_dev == sb.st_dev
+    except OSError:
+        return False
+
+
 def run(args):
     root = Path(args.cache) if args.cache else _cache_root()
     if not root.is_dir():
@@ -70,14 +78,10 @@ def run(args):
         return 1
 
     shared = _shared_blobs(root)
-    if not shared:
-        print("no shared blob store found (empty cache or a huggingface_hub older than v1.32); nothing to dedupe")
-        return 0
-
     per_repo = _per_repo_blobs(root)
-    dups = []  # (repo, blob path, size, sha256)
-    errors = []
     by_digest = defaultdict(list)  # per-repo blobs sharing content
+    errors = []
+    total_readable = 0
     for repo_name, blob in per_repo:
         try:
             digest = _sha256_file(blob)
@@ -85,24 +89,51 @@ def run(args):
         except OSError as e:
             errors.append(f"{repo_name}: {e}")
             continue
+        total_readable += size
         by_digest[digest].append((repo_name, blob, size))
-        if digest in shared:
-            dups.append((repo_name, blob, size, digest))
 
-    intra = {d: files for d, files in by_digest.items() if len(files) > 1}
+    # Shared-store duplicates: per-repo blobs whose sha256 exists in the store.
+    # Blobs already hardlinked to the shared blob are not reclaimable.
+    dups = []  # (repo, blob path, size, sha256)
+    if shared:
+        for digest, files in by_digest.items():
+            if digest not in shared:
+                continue
+            target = root / "blobs" / digest[:2] / digest
+            for repo_name, blob, size in files:
+                if _same_file(target, blob):
+                    continue
+                dups.append((repo_name, blob, size, digest))
+
+    # Intra-repo duplicates: content shared across repo caches, not already
+    # covered by the shared store. Skip blobs already hardlinked to the keep file.
+    intra = {}
+    for digest, files in by_digest.items():
+        if digest in shared or len(files) < 2:
+            continue
+        keep_blob = files[0][1]
+        dup_files = [(r, b, s) for r, b, s in files[1:] if not _same_file(keep_blob, b)]
+        if dup_files:
+            intra[digest] = [files[0], *dup_files]
+
     intra_reclaim = sum(size for files in intra.values() for _, _, size in files[1:])
     reclaim = sum(size for _, _, size, _ in dups)
+
     print(f"cache: {root}")
-    print(f"shared store: {len(shared)} blob(s), {sum(shared.values()):,} bytes")
-    total = sum(b.stat().st_size for _, b in per_repo)
-    print(f"per-repo blobs (pre-v1.32 layout): {len(per_repo)} files, {total:,} bytes")
+    if shared:
+        print(f"shared store: {len(shared)} blob(s), {sum(shared.values()):,} bytes")
+    else:
+        print("no shared blob store found (empty cache or a huggingface_hub older than v1.32)")
+    print(f"per-repo blobs (pre-v1.32 layout): {len(per_repo)} files, {total_readable:,} bytes")
     print(f"duplicates of shared blobs: {len(dups)} file(s), {reclaim:,} bytes reclaimable")
     for repo_name, blob, size, digest in dups[:10]:
         print(f"  {size:>12,} B  {repo_name}/{blob.name}  sha256={digest[:16]}…")
     if len(dups) > 10:
         print(f"  … {len(dups) - 10} more")
     if intra:
-        print(f"same content in {len(intra)} per-repo group(s) (pre-v1.32 duplication, not shared-store overlap): ~{intra_reclaim:,} bytes reclaimable")
+        print(
+            f"same content in {len(intra)} per-repo group(s) (pre-v1.32 duplication, not shared-store overlap): ~{intra_reclaim:,} bytes reclaimable"
+        )
         for digest, files in list(intra.items())[:10]:
             total = sum(size for _, _, size in files)
             print(f"  {total:>12,} B  sha256={digest[:16]}…  in {len(files)} repo caches")
@@ -112,17 +143,12 @@ def run(args):
     if not dups and not intra:
         return 0
     if not args.apply:
-        print("dry run: pass --apply to hardlink duplicates onto the shared store (and the first copy in each intra-repo group)")
+        print(
+            "dry run: pass --apply to hardlink duplicates onto the shared store (and the first copy in each intra-repo group)"
+        )
         return 0
 
     # Shared-store duplicates first, then intra-repo duplicates.
-    def _same_file(a, b):
-        try:
-            sa, sb = a.stat(), b.stat()
-            return sa.st_ino == sb.st_ino and sa.st_dev == sb.st_dev
-        except OSError:
-            return False
-
     def _link_to(target, blob):
         if _same_file(target, blob):
             return
@@ -153,7 +179,9 @@ def run(args):
                 continue
             _link_to(keep, blob)
 
-    print(f"hardlinked {len(dups)} shared-store duplicate(s) and {sum(len(f) - 1 for f in intra.values())} intra-repo duplicate(s); ~{reclaim + intra_reclaim:,} bytes reclaimable")
+    print(
+        f"hardlinked {len(dups)} shared-store duplicate(s) and {sum(len(f) - 1 for f in intra.values())} intra-repo duplicate(s); ~{reclaim + intra_reclaim:,} bytes reclaimable"
+    )
     return 0
 
 

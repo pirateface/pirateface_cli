@@ -235,6 +235,10 @@ def _main():
         "/api/files/by-sha256 lookup. Only files the site lists (and that are at least 1 MiB) can match.",
     )
     f.add_argument("file", help="the local file to identify")
+
+    from pirateface import dedupe
+
+    dedupe.register(sub)
     args = p.parse_args()
 
     if args.cmd == "index":
@@ -269,6 +273,9 @@ def _main():
         from pirateface.seed import command
 
         return command.run(args)
+
+    if args.cmd == "dedupe":
+        return dedupe.run(args)
 
     from huggingface_hub import snapshot_download
 

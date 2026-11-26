@@ -50,9 +50,15 @@ jobs:
           readme_path = pathlib.Path('README.md')
           text = readme_path.read_text()
           heading = '## Community Contributors'
+          assert text.count(heading) == 1, 'Community Contributors heading must appear exactly once'
           idx = text.index(heading)
-          # Community Contributors is the final section; everything from the heading on is regenerated.
-          new_text = text[:idx].rstrip('\n') + '\n\n' + section
+          rest = text[idx + len(heading):]
+          next_idx = rest.find('\n## ')
+          tail = ('\n' + rest[next_idx:]).strip('\n') if next_idx != -1 else ''
+          head = text[:idx].rstrip('\n')
+          new_text = head + '\n\n' + section
+          if tail:
+              new_text = new_text.rstrip('\n') + '\n\n' + tail + '\n'
           readme_path.write_text(new_text)
           PY
           git add README.md

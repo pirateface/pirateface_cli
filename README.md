@@ -70,3 +70,11 @@ uv run --group dev ruff check
 - Fix problems where they start rather than adding special cases around them.
 - If Pirate Face can't be reached, say so and carry on. Never crash, and never write outside the model folder.
 - Add your Pirate Face username to the PR so we can credit you.
+
+## Community Contributors
+
+<p align="center">
+  <a href="https://github.com/ZeroPointSynergy"><img src="https://github.com/ZeroPointSynergy.png" width="48" height="48" alt="ZeroPointSynergy"></a>
+  <a href="https://github.com/dmitryrn"><img src="https://github.com/dmitryrn.png" width="48" height="48" alt="dmitryrn"></a>
+  <a href="https://github.com/AndriiZvorygin"><img src="https://github.com/AndriiZvorygin.png" width="48" height="48" alt="AndriiZvorygin"></a>
+</p>

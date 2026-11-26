@@ -1,0 +1,71 @@
+name: Community Contributors
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: contributors-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip the workflow's own commit
+        id: guard
+        env:
+          HEAD_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          case "$HEAD_MSG" in
+            "chore: sync Community Contributors") echo "skip=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.skip != 'true'
+      - name: Sync Community Contributors section
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          python3 << 'PY'
+          import pathlib
+
+          handles = [
+              line.strip()
+              for line in pathlib.Path('.github/community-contributors.txt').read_text().splitlines()
+              if line.strip() and not line.strip().startswith('#')
+          ]
+          assert handles, 'no contributors listed'
+          lines = ['## Community Contributors', '', '<p align="center">']
+          for h in handles:
+              lines.append(
+                  f'  <a href="https://github.com/{h}"><img src="https://github.com/{h}.png" width="48" height="48" alt="{h}"></a>'
+              )
+          lines.append('</p>')
+          section = '\n'.join(lines) + '\n'
+
+          readme_path = pathlib.Path('README.md')
+          text = readme_path.read_text()
+          heading = '## Community Contributors'
+          assert text.count(heading) == 1, 'Community Contributors heading must appear exactly once'
+          idx = text.index(heading)
+          rest = text[idx + len(heading):]
+          next_idx = rest.find('\n## ')
+          tail = ('\n' + rest[next_idx:]).strip('\n') if next_idx != -1 else ''
+          head = text[:idx].rstrip('\n')
+          new_text = head + '\n\n' + section
+          if tail:
+              new_text = new_text.rstrip('\n') + '\n\n' + tail + '\n'
+          readme_path.write_text(new_text)
+          PY
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "Community Contributors section already up to date"
+          else
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore: sync Community Contributors"
+            git push origin HEAD:main
+          fi

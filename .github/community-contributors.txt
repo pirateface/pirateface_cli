@@ -1,0 +1,4 @@
+# Community Contributors handles, one per line. Workflow .github/workflows/contributors.yml regenerates the README section from this list.
+ZeroPointSynergy
+dmitryrn
+AndriiZvorygin

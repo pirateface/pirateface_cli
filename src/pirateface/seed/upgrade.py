@@ -229,7 +229,7 @@ def nudge(repo=None):
     entries = superseded_in_client(repo)
     if not entries:
         return
-    repos = sorted({s.get("repo") for _, s in entries if s.get("repo")})
+    repos = sorted({s.get("repo") for _, s in entries if isinstance(s.get("repo"), str) and s.get("repo")})
     names = ", ".join(repos) if repos else "your torrents"
     print(f"    {len(entries)} superseded torrent(s) in qBittorrent ({names}): switch with: pf seed --upgrade")
 

@@ -251,6 +251,40 @@ def file_root(root):
         return None
 
 
+def rows_by_sha256(digest):
+    """The listed rows whose sha256 is digest (POST /api/files/by-sha256), as a list of dicts.
+
+    An empty list is an answer: no listed model holds the file. Raises Unreachable when the site cannot be
+    reached, Unreadable when the site's answer is refused or cannot be read."""
+    payload = json.dumps({"hashes": [digest]}).encode()
+    try:
+        status, body = _http_request_json(
+            f"{API}/api/files/by-sha256",
+            30,
+            headers={"Content-Type": "application/json"},
+            policy=NO_REDIRECTS,
+            method="POST",
+            data=payload,
+        )
+    except urllib.error.HTTPError as e:
+        raise Unreadable(f"the site refused the lookup (HTTP {e.code})") from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise Unreachable(f"could not reach {API} ({e})") from e
+    except json.JSONDecodeError as e:
+        raise Unreadable(f"the site's answer could not be read ({e})") from e
+    if status != 200:
+        raise Unreadable(f"the site answered HTTP {status}")
+    if not isinstance(body, dict):
+        raise Unreadable("the site's answer was not a {hash: [rows]} map")
+    rows = body.get(digest)
+    if not isinstance(rows, list):
+        raise Unreadable(f"the site's answer was missing or malformed for {digest}")
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("repoId") or not row.get("path"):
+            raise Unreadable(f"the site's answer was malformed for {digest}")
+    return rows
+
+
 def download(path):
     """A .torrent on the site (path as the API gives it), or None."""
     with contextlib.suppress(Exception):

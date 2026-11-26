@@ -72,8 +72,7 @@ uv run --group dev ruff check
 ## Community Contributors
 
 <p align="center">
-  <a href="https://github.com/pirateface"><img src="https://avatars.githubusercontent.com/u/341030615?v=4&s=48" width="48" height="48" alt="pirateface"></a>
-  <a href="https://github.com/ZeroPointSynergy"><img src="https://avatars.githubusercontent.com/u/264705859?v=4&s=48" width="48" height="48" alt="ZeroPointSynergy"></a>
-  <a href="https://github.com/dmitryrn"><img src="https://avatars.githubusercontent.com/u/25539852?v=4&s=48" width="48" height="48" alt="dmitryrn"></a>
-  <a href="https://github.com/AndriiZvorygin"><img src="https://avatars.githubusercontent.com/u/305620283?v=4&s=48" width="48" height="48" alt="AndriiZvorygin"></a>
+  <a href="https://github.com/ZeroPointSynergy"><img src="https://github.com/ZeroPointSynergy.png" width="48" height="48" alt="ZeroPointSynergy"></a>
+  <a href="https://github.com/dmitryrn"><img src="https://github.com/dmitryrn.png" width="48" height="48" alt="dmitryrn"></a>
+  <a href="https://github.com/AndriiZvorygin"><img src="https://github.com/AndriiZvorygin.png" width="48" height="48" alt="AndriiZvorygin"></a>
 </p>

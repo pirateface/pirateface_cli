@@ -25,7 +25,10 @@ def local_copy(repo, revision, download):
             return None
     print(f"==> Downloading {repo}")
     os.environ["PF_NO_RESCUE"] = "1"  # we're about to submit it ourselves
-    return Path(snapshot_download(repo, revision=revision, max_workers=1))
+    try:
+        return Path(snapshot_download(repo, revision=revision, max_workers=1))
+    except Exception as e:  # not an OSError-only path: huggingface_hub raises plain exceptions
+        raise SeedError(f"could not download {repo}: {e}") from e
 
 
 def weights(src, paths):

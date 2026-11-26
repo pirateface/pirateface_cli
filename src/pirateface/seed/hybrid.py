@@ -122,6 +122,52 @@ def build(root, trackers, plen=None, sums=None, blocks=None, paths=None):
     return build_from(root.absolute().name, from_folder(root, paths), trackers, plen, sums, blocks)
 
 
+def _hash_file(path, opener, *, partial, per_piece, plen, piece_pad, v1, blocks, sums, on_piece, first):
+    """Fresh-hash one file from opener(): stream its BLOCK reads, hash every block, and return (size, root, layer).
+
+    partial: the saved offset, v1 hashes and v2 roots of an interrupted file. When it names this path, the saved
+    pieces and roots are restored into v1.done/piece_roots before the stream is opened. ``first`` is the number
+    of v1 pieces in v1.done before this file started (captured by the caller), which the on_piece callback slices
+    from. blocks: a proofs.BlockHashes that keeps every block hash. sums: a dict to fill with the file's SHA-256.
+    on_piece: called at each piece boundary with the stream so far; the caller owns the stream's resumable hash.
+    """
+    size = 0
+    leaves, piece_roots, root, layer = [], [], b"", b""
+    if partial and partial["path"] == path:
+        size = partial["offset"]
+        pieces = bytes.fromhex(partial["v1"])
+        v1.done.extend(pieces[i : i + 20] for i in range(0, len(pieces), 20))
+        roots = bytes.fromhex(partial["roots"])
+        piece_roots = [roots[i : i + 32] for i in range(0, len(roots), 32)]
+    whole = hashlib.sha256() if sums is not None else None
+    if blocks is not None:
+        blocks.begin(path)
+    with opener() as f:
+        while block := f.read(BLOCK):
+            size += len(block)
+            v1.add(block)
+            if whole:
+                whole.update(block)
+            leaves.append(hashlib.sha256(block).digest())
+            if blocks is not None:
+                blocks.add(leaves[-1])
+            if len(leaves) == per_piece:
+                piece_roots.append(_merkle(leaves, ZERO))
+                leaves = []
+                if on_piece:
+                    on_piece(path, size, b"".join(v1.done[first:]), b"".join(piece_roots), f)
+    if whole:
+        sums[path] = whole.hexdigest()
+    if size > plen:
+        if leaves:
+            piece_roots.append(_merkle(leaves + [ZERO] * (per_piece - len(leaves)), ZERO))
+        root = _merkle(piece_roots, piece_pad)
+        layer = b"".join(piece_roots)
+    elif size:
+        root = piece_roots[0] if piece_roots else _merkle(leaves, ZERO)
+    return size, root, layer
+
+
 def build_from(
     name, sources, trackers, plen, sums=None, blocks=None, done=None, on_file=None, partial=None, on_piece=None
 ):
@@ -149,39 +195,20 @@ def build_from(
             size, root, layer, pieces = done[path]
             v1.done += [pieces[i : i + 20] for i in range(0, len(pieces), 20)]
         else:
-            first, size, leaves, piece_roots, root, layer = len(v1.done), 0, [], [], b"", b""
-            if partial and partial["path"] == path:
-                size = partial["offset"]
-                pieces = bytes.fromhex(partial["v1"])
-                roots = bytes.fromhex(partial["roots"])
-                v1.done.extend(pieces[i : i + 20] for i in range(0, len(pieces), 20))
-                piece_roots = [roots[i : i + 32] for i in range(0, len(roots), 32)]
-            whole = hashlib.sha256() if sums is not None else None
-            if blocks is not None:
-                blocks.begin(path)
-            with opener() as f:
-                while block := f.read(BLOCK):
-                    size += len(block)
-                    v1.add(block)
-                    if whole:
-                        whole.update(block)
-                    leaves.append(hashlib.sha256(block).digest())
-                    if blocks is not None:
-                        blocks.add(leaves[-1])
-                    if len(leaves) == per_piece:
-                        piece_roots.append(_merkle(leaves, ZERO))
-                        leaves = []
-                        if on_piece:
-                            on_piece(path, size, b"".join(v1.done[first:]), b"".join(piece_roots), f)
-            if whole:
-                sums[path] = whole.hexdigest()
-            if size > plen:
-                if leaves:
-                    piece_roots.append(_merkle(leaves + [ZERO] * (per_piece - len(leaves)), ZERO))
-                root = _merkle(piece_roots, piece_pad)
-                layer = b"".join(piece_roots)
-            elif size:
-                root = piece_roots[0] if piece_roots else _merkle(leaves, ZERO)
+            first = len(v1.done)
+            size, root, layer = _hash_file(
+                path,
+                opener,
+                partial=partial,
+                per_piece=per_piece,
+                plen=plen,
+                piece_pad=piece_pad,
+                v1=v1,
+                blocks=blocks,
+                sums=sums,
+                on_piece=on_piece,
+                first=first,
+            )
             v1.add(bytes(-size % plen if padded else 0))
             if on_file and (not v1.filled or not padded):
                 pieces = b"".join(v1.done[first:])

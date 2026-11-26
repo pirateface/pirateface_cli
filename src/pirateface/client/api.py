@@ -354,9 +354,9 @@ def upgrade(key, body):
     return submit(key, body, "/api/torrents/upgrade")
 
 
-def torrent_status(infohash):
+def torrent_status(infohash, timeout=15):
     """Pirate Face's record of a torrent by v1 infohash ({infohash, repo, status, supersededBy}), or None."""
-    return _get_json(f"/api/torrents/{infohash}", 15)
+    return _get_json(f"/api/torrents/{infohash}", timeout)
 
 
 def my_torrents(key):

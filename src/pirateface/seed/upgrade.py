@@ -8,6 +8,7 @@ Without a repo (any seeder): switch every torrent in qBittorrent that Pirate Fac
 replacement, so you keep seeding the swarm that is listed."""
 
 import base64
+import time
 from pathlib import Path
 
 from pirateface import ui
@@ -17,6 +18,12 @@ from pirateface.seed import clients, hybrid, package, user
 from pirateface.seed.clients.common import LoginRefused
 from pirateface.seed.per_file.command import NEEDS_QBITTORRENT, qbittorrent, seed_model
 from pirateface.seed.user import SeedError
+
+# The nudge is a note, not a wait: a slow or down site/client must not hold up `pf seed`. Every call gets a
+# tight per-call timeout and the whole scan a total wall-clock budget, reusing qbt.trackers()/api.torrent_status()
+# per torrent exactly as the rest of this module does.
+NUDGE_CALL_TIMEOUT = 5.0
+NUDGE_TOTAL_BUDGET = 10.0
 
 
 def _qbittorrent():
@@ -161,27 +168,39 @@ def upgrade_mine():
     _report_mine(done, already, upgraded, problems)
 
 
-def replacement(qbt, t):
-    """The site's record of a v1-only Pirate Face torrent in qBittorrent if it was replaced, else None."""
-    if t.get("infohash_v2") or not clients.is_pirateface(qbt.trackers(t["hash"])):
+def replacement(qbt, t, timeout=None):
+    """The site's record of a v1-only Pirate Face torrent in qBittorrent if it was replaced, else None.
+    timeout: per-call cap (seconds) applied to both the qBittorrent trackers call and the site lookup;
+    None keeps the clients' own defaults."""
+    hash_ = t.get("hash")
+    if not hash_ or t.get("infohash_v2"):
         return None
-    status = api.torrent_status(t.get("infohash_v1") or t["hash"])
+    if not clients.is_pirateface(qbt.trackers(hash_, timeout=timeout or 30)):
+        return None
+    status = api.torrent_status(t.get("infohash_v1") or hash_, timeout=timeout or 15)
     return status if status and status.get("status") == "superseded" and status.get("supersededBy") else None
 
 
 def superseded_in_client(only_repo=None):
     """(entry, status) pairs of the v1-only Pirate Face torrents in qBittorrent that Pirate Face replaced,
-    optionally only those for a repo. Best-effort: client or site failures yield an empty list."""
+    optionally only those for a repo. Best-effort: client or site failures yield an empty list; the whole
+    scan is bounded by a total wall-clock budget so a slow or down site or client never hangs `pf seed`."""
     try:
         qbt = _qbittorrent()
-        torrents = qbt.torrents()
-    except (SeedError, OSError, ValueError):
+        deadline = time.monotonic() + NUDGE_TOTAL_BUDGET
+        torrents = qbt.torrents(timeout=min(NUDGE_CALL_TIMEOUT, NUDGE_TOTAL_BUDGET))
+    except (SeedError, OSError, ValueError, KeyError):
+        return []
+    if not isinstance(torrents, list):
         return []
     found = []
     for t in torrents:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not isinstance(t, dict):
+            continue
         try:
-            status = replacement(qbt, t)
-        except (SeedError, LoginRefused, OSError, ValueError):
+            status = replacement(qbt, t, timeout=min(NUDGE_CALL_TIMEOUT, remaining))
+        except (SeedError, LoginRefused, KeyError, OSError, ValueError):
             continue
         if status and (only_repo is None or status.get("repo") == only_repo):
             found.append((t, status))

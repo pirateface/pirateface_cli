@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 from pirateface._http import request as _http_request
-from pirateface.seed.clients.common import KEYED, LoginRefused, is_pirateface
+from pirateface.seed.clients.common import KEYED, LoginRefused, tracker_update_loop
 
 
 class Transmission:
@@ -47,17 +47,8 @@ class Transmission:
         self.rpc("torrent-add", {"metainfo": base64.b64encode(data).decode(), "download-dir": str(save_dir)})
 
     def update_trackers(self, mine):
-        added = current = skipped = 0
-        changed = []
-        for t in self.rpc("torrent-get", {"fields": ["id", "trackers"]})["torrents"]:
+        def mutate(t, urls):
             trackers = t["trackers"]
-            urls = [x["announce"] for x in trackers]
-            if not is_pirateface(urls):
-                skipped += 1
-                continue
-            if mine in urls:
-                current += 1
-                continue
             keep = [x for x in trackers if not KEYED.match(x["announce"])]  # a key replaced at /account
             if self.version >= 17:  # Transmission 4: trackerList, one tier per blank-line block
                 tiers = {}
@@ -70,10 +61,15 @@ class Transmission:
                 if old:
                     self.rpc("torrent-set", {"ids": [t["id"]], "trackerRemove": old})
                 self.rpc("torrent-set", {"ids": [t["id"]], "trackerAdd": [mine]})
-            added += 1
-            changed.append(t["id"])
+
+        added, current, skipped, changed = tracker_update_loop(
+            self.rpc("torrent-get", {"fields": ["id", "trackers"]})["torrents"],
+            mine,
+            lambda t: [x["announce"] for x in t["trackers"]],
+            mutate,
+        )
         if changed:
-            self.rpc("torrent-reannounce", {"ids": changed})
+            self.rpc("torrent-reannounce", {"ids": [t["id"] for t in changed]})
         return added, current, skipped, ""
 
     def torrents_named(self, name):

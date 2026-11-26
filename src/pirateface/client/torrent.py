@@ -2,7 +2,6 @@ import atexit
 import contextlib
 import enum
 import shutil
-import sys
 import threading
 import time
 from pathlib import Path
@@ -11,7 +10,7 @@ import libtorrent as lt
 
 from pirateface import config, ui
 from pirateface._http import user_agent as _user_agent
-from pirateface.client import api
+from pirateface.client import alerts, api
 from pirateface.client.files import (
     NotInTorrent,
     Unavailable,
@@ -29,8 +28,6 @@ _handles = {}  # repo_id -> its state once asked: a torrent handle, RepoState.NO
 _wanted = {}
 _active = {}  # repo_id -> fetch_file calls currently downloading
 _setup = {}  # repo_id -> lock serialising handle setup
-_resume = {}  # infohash -> bencoded resume data captured from the alert pump
-_resume_cv = threading.Condition()
 _idle_cv = threading.Condition(_lock)  # signalled when a repo's in-flight fetch count drops
 
 
@@ -56,36 +53,8 @@ def _get_session():
                 "min_announce_interval": 60,
             }
         )
-        threading.Thread(target=_pump_alerts, args=(_session, debug), daemon=True).start()
+        alerts.start_pump(_session, debug)
     return _session
-
-
-# libtorrent reports pieces done before they're written, so files can read as zeros until flushed.
-# cache_flushed_alert doesn't say which flush it answers, so only one runs at a time.
-_flush = threading.Condition()
-_flush_one_at_a_time = threading.Lock()
-_flush_done = {}
-
-
-def _pump_alerts(session, debug):
-    """The only reader of libtorrent's alerts."""
-    noisy = ("PIECE", "HAVE", "REQUEST", "picker", "ALLOWED_FAST", "dht", "portmap", "stats", "block")
-    while True:
-        session.wait_for_alert(1000)
-        for a in session.pop_alerts():
-            if isinstance(a, lt.cache_flushed_alert):
-                with _flush:
-                    key = str(a.handle.info_hashes().v1)
-                    _flush_done[key] = _flush_done.get(key, 0) + 1
-                    _flush.notify_all()
-            if isinstance(a, lt.save_resume_data_alert):
-                with _resume_cv:
-                    _resume[str(a.handle.info_hashes().v1)] = lt.bencode(a.resume_data)
-                    _resume_cv.notify_all()
-            if debug:
-                msg = a.message()
-                if not any(k in msg or k in type(a).__name__ for k in noisy):
-                    print(f"[lt] {msg[:220]}", file=sys.stderr, flush=True)
 
 
 @atexit.register
@@ -108,26 +77,6 @@ def _cleanup():
                 shutil.rmtree(path, ignore_errors=True)
             else:
                 path.unlink(missing_ok=True)
-
-
-def _flush_to_disk(h, timeout=30):
-    key = str(h.info_hashes().v1)
-    with _flush_one_at_a_time, _flush:
-        before = _flush_done.get(key, 0)
-        h.flush_cache()
-        if not _flush.wait_for(lambda: _flush_done.get(key, 0) > before, timeout):
-            raise TimeoutError("libtorrent didn't confirm the file was written to disk")
-
-
-def _resume_data(h, timeout=10):
-    """Bencoded resume data, so a re-added handle trusts what is already on disk instead of re-hashing it."""
-    key = str(h.info_hashes().v1)
-    with _resume_cv:
-        _resume.pop(key, None)
-        h.save_resume_data()
-        if not _resume_cv.wait_for(lambda: key in _resume, timeout):
-            return None
-        return _resume.pop(key)
 
 
 def _setup_lock(repo_id):
@@ -381,7 +330,7 @@ def _revive_if_finished(repo_id, h, magnet):
             _idle_cv.wait(5)
     if h.status().state != lt.torrent_status.finished:  # still: no other fetch revived it meanwhile
         return h
-    resume = _resume_data(h)
+    resume = alerts.resume_data(h)
     _forget(repo_id, h)
     return _handle(repo_id, resume, magnet=magnet)
 
@@ -426,7 +375,7 @@ def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=Non
 
     try:
         _wait_for_download(h, i, size, stall_timeout)
-        _flush_to_disk(h)
+        alerts.flush_to_disk(h)
         return path
     except BaseException:
         # A failed fetch must not leave its file wanted forever: at priority 4 the

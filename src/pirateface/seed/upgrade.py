@@ -14,6 +14,7 @@ from pirateface import ui
 from pirateface.client import api, torrent
 from pirateface.config import API
 from pirateface.seed import clients, hybrid, package, user
+from pirateface.seed.clients.common import LoginRefused
 from pirateface.seed.per_file.command import NEEDS_QBITTORRENT, qbittorrent, seed_model
 from pirateface.seed.user import SeedError
 
@@ -166,6 +167,35 @@ def replacement(qbt, t):
         return None
     status = api.torrent_status(t.get("infohash_v1") or t["hash"])
     return status if status and status.get("status") == "superseded" and status.get("supersededBy") else None
+
+
+def superseded_in_client(only_repo=None):
+    """(entry, status) pairs of the v1-only Pirate Face torrents in qBittorrent that Pirate Face replaced,
+    optionally only those for a repo. Best-effort: client or site failures yield an empty list."""
+    try:
+        qbt = _qbittorrent()
+        torrents = qbt.torrents()
+    except (SeedError, OSError, ValueError):
+        return []
+    found = []
+    for t in torrents:
+        try:
+            status = replacement(qbt, t)
+        except (SeedError, LoginRefused, OSError, ValueError):
+            continue
+        if status and (only_repo is None or status.get("repo") == only_repo):
+            found.append((t, status))
+    return found
+
+
+def nudge(repo=None):
+    """Best-effort note, never fatal: the client holds superseded torrents and how to switch them."""
+    entries = superseded_in_client(repo)
+    if not entries:
+        return
+    repos = sorted({s.get("repo") for _, s in entries if s.get("repo")})
+    names = ", ".join(repos) if repos else "your torrents"
+    print(f"    {len(entries)} superseded torrent(s) in qBittorrent ({names}): switch with: pf seed --upgrade")
 
 
 def switch(qbt, t, status, trackers):

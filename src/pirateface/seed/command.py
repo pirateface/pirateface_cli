@@ -49,15 +49,6 @@ def matching_quant(repo, src):
     return best[0]["quant"] if best[0] and len(quants) > 1 and best[1] else None
 
 
-def superseded_nudge(v1):
-    """Print a nudge when this torrent is superseded on Pirate Face: the clean one-command switch.
-    Non-fatal by design: seeding still proceeds."""
-    status = api.torrent_status(v1)
-    if status and status.get("status") == "superseded" and status.get("supersededBy"):
-        print("    This torrent is superseded on Pirate Face. Switch to the replacement with:")
-        print("    pf seed --upgrade")
-
-
 def seed_listed(repo, src, key, per_file=False):
     """Seed the torrent Pirate Face already lists, with whatever files src has."""
     try:
@@ -81,7 +72,6 @@ def seed_listed(repo, src, key, per_file=False):
     trackers = api.trackers(key)
     data = package.with_trackers(data, trackers)
     name, v1, v2, single = package.info(data)
-    superseded_nudge(v1)
     out = Path(SEEDS, package.seeds_folder(repo, v1))
     save_dir = out / "files"
     have = package.link_existing(src, save_dir if single else save_dir / name, paths) if src else 0
@@ -90,6 +80,7 @@ def seed_listed(repo, src, key, per_file=False):
     torrent_path.write_bytes(data)
     rest = "" if have == len(paths) else "; the client downloads the rest"
     print(f"==> {repo} is on Pirate Face. You have {have} of its {len(paths)} files{rest}.")
+    upgrade.nudge(repo)
     submit.start_seeding(repo, data, save_dir, v1, v2, name, trackers, torrent_path, wait=False, per_file=per_file)
     if per_file:
         seed_model(data, save_dir, v1, label=repo)
@@ -130,6 +121,7 @@ def update_trackers():
     except RuntimeError as e:
         raise SeedError(str(e)) from e
     print("    Done. Pirate Face counts your seeding from the next announce (within 10 minutes).")
+    upgrade.nudge()
 
 
 def run(args):

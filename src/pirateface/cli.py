@@ -87,7 +87,8 @@ def _main():
             "  pf seed --upgrade org/model  v1 only becomes hybrid v1+v2\n"
             "  pf work --once               one queued model, from Hugging Face\n"
             "  pf restore PATH              put a .torrent back on a listing\n"
-            "  pf index [--sync|--add]      show the cached index, mirror it, or add it to qBittorrent"
+            "  pf index [--sync|--add]      show the cached index, mirror it, or add it to qBittorrent\n"
+            "  pf find-model FILE           what listed models hold this file (sha256)"
         ),
     )
     from pirateface.client.api import VERSION
@@ -231,7 +232,7 @@ def _main():
         "find-model",
         help="what listed model does this local file belong to (sha256)",
         description="Hash a local file and print every listed model whose sha256 it matches, via the site's "
-        "batched /api/files/by-sha256 lookup. Only files the site lists (and that are at least 1 MiB) can match.",
+        "/api/files/by-sha256 lookup. Only files the site lists (and that are at least 1 MiB) can match.",
     )
     f.add_argument("file", help="the local file to identify")
     args = p.parse_args()

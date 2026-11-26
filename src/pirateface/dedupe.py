@@ -44,51 +44,42 @@ def _is_regular_file(path):
         return False
 
 
-def _shared_blobs(root, errors):
-    """Map content sha256 -> (store path, size) for the shared blob store.
+def _collect_blobs(root, errors):
+    """Collect (path, size, dev, ino, kind, repo_name) for every real blob.
 
-    Store entries are keyed by Xet hash, not by content sha256, so the only
-    reliable match is hashing the entry's content. Sidecars (.lock/.refs/.tmp),
-    symlinks and other non-regular files are ignored, as are names that do not
-    look like a hash.
+    Sidecars (.lock/.refs/.tmp), symlinks and non-regular files are ignored, as
+    are names that do not look like a hash (shared store only).
     """
+    entries = []
     store = root / "blobs"
-    if not store.is_dir():
-        return {}
-    found = {}
-    try:
-        sidedirs = sorted(store.iterdir())
-    except OSError as e:
-        errors.append(f"shared store: {e}")
-        return {}
-    for sidedir in sidedirs:
-        if not sidedir.is_dir():
-            continue
+    if store.is_dir():
         try:
-            entries = sorted(sidedir.iterdir())
+            sidedirs = sorted(store.iterdir())
         except OSError as e:
-            errors.append(f"shared store/{sidedir.name}: {e}")
-            continue
-        for blob in entries:
-            if not _BLOB_NAME.fullmatch(blob.name) or not _is_regular_file(blob):
+            errors.append(f"shared store: {e}")
+            sidedirs = []
+        for sidedir in sidedirs:
+            if not sidedir.is_dir():
                 continue
             try:
-                size = blob.stat().st_size
-                digest = _sha256_file(blob)
+                side_entries = sorted(sidedir.iterdir())
             except OSError as e:
-                errors.append(f"shared store/{sidedir.name}/{blob.name}: {e}")
+                errors.append(f"shared store/{sidedir.name}: {e}")
                 continue
-            found[digest] = (blob, size)
-    return found
-
-
-def _per_repo_blobs(root, errors):
-    seen = []
+            for blob in side_entries:
+                if not _BLOB_NAME.fullmatch(blob.name) or not _is_regular_file(blob):
+                    continue
+                try:
+                    st = blob.stat()
+                except OSError as e:
+                    errors.append(f"shared store/{sidedir.name}/{blob.name}: {e}")
+                    continue
+                entries.append((blob, st.st_size, st.st_dev, st.st_ino, "shared", None))
     try:
         repos = sorted(root.iterdir())
     except OSError as e:
         errors.append(f"cache root: {e}")
-        return seen
+        repos = []
     for repo in repos:
         if not repo.is_dir() or repo.name in ("blobs", ".locks"):
             continue
@@ -96,11 +87,11 @@ def _per_repo_blobs(root, errors):
         if not blobs.is_dir():
             continue
         try:
-            entries = sorted(blobs.iterdir())
+            repo_entries = sorted(blobs.iterdir())
         except OSError as e:
             errors.append(f"{repo.name}/blobs: {e}")
             continue
-        for blob in entries:
+        for blob in repo_entries:
             # Symlinks (new-layout shared-store links) and anything with a
             # sidecar suffix (.incomplete/.metadata/.lock/.refs/.tmp) are not
             # cache blobs and are never touched.
@@ -108,8 +99,26 @@ def _per_repo_blobs(root, errors):
                 continue
             if not _is_regular_file(blob):
                 continue
-            seen.append((repo.name, blob))
-    return seen
+            try:
+                st = blob.stat()
+            except OSError as e:
+                errors.append(f"{repo.name}: {e}")
+                continue
+            entries.append((blob, st.st_size, st.st_dev, st.st_ino, "per_repo", repo.name))
+    return entries
+
+
+def _hash_candidates(entries):
+    """Hash only entries whose size appears in >= 2 distinct inodes.
+
+    Two blobs can only be duplicates of one another when their sizes match,
+    so a size seen in a single inode can never match anything; hashing it
+    would read hundreds of GB of unique-sized weights for nothing.
+    """
+    sizes = defaultdict(set)  # size -> set of (dev, ino)
+    for _path, size, dev, ino, _kind, _repo in entries:
+        sizes[size].add((dev, ino))
+    return [(p, s, d, i, k, r) for p, s, d, i, k, r in entries if len(sizes[s]) >= 2]
 
 
 def _same_file(a, b):
@@ -127,19 +136,23 @@ def run(args):
         return 1
 
     errors = []
-    shared = _shared_blobs(root, errors)
-    per_repo = _per_repo_blobs(root, errors)
+    entries = _collect_blobs(root, errors)
+    total_readable = sum(size for _path, size, _dev, _ino, kind, _repo in entries if kind == "per_repo")
+    total_store_bytes = sum(size for _path, size, _dev, _ino, kind, _repo in entries if kind == "shared")
+    store_file_count = sum(1 for _path, _size, _dev, _ino, kind, _repo in entries if kind == "shared")
+    per_repo_count = sum(1 for _path, _size, _dev, _ino, kind, _repo in entries if kind == "per_repo")
     by_digest = defaultdict(list)  # per-repo blobs sharing content
-    total_readable = 0
-    for repo_name, blob in per_repo:
+    shared = {}  # content sha256 -> (store path, size)
+    for path, size, _dev, _ino, kind, repo_name in _hash_candidates(entries):
         try:
-            digest = _sha256_file(blob)
-            size = blob.stat().st_size
+            digest = _sha256_file(path)
         except OSError as e:
-            errors.append(f"{repo_name}: {e}")
+            errors.append(f"{repo_name or 'shared store'}: {e}")
             continue
-        total_readable += size
-        by_digest[digest].append((repo_name, blob, size))
+        if kind == "shared":
+            shared[digest] = (path, size)
+        else:
+            by_digest[digest].append((repo_name, path, size))
 
     # Shared-store duplicates: per-repo blobs whose content is already in the store.
     # Blobs already hardlinked to the shared blob are not reclaimable.
@@ -154,9 +167,9 @@ def run(args):
                 continue
             dups.append((repo_name, blob, size, digest))
 
-    # Intra-repo duplicates: content shared across repo caches, not already
-    # covered by the shared store. Skip blobs already hardlinked to the keep file.
-    intra = {}
+    # Cross-repo / per-repo duplicates: same content across per-repo blobs, not
+    # already covered by the shared store. Skip blobs already hardlinked to the keep file.
+    per_repo_dups = {}
     for digest, files in by_digest.items():
         if digest in shared or len(files) < 2:
             continue
@@ -164,46 +177,46 @@ def run(args):
         keep_blob = files[0][1]
         dup_files = [(r, b, s) for r, b, s in files[1:] if not _same_file(keep_blob, b)]
         if dup_files:
-            intra[digest] = [files[0], *dup_files]
+            per_repo_dups[digest] = [files[0], *dup_files]
 
-    intra_reclaim = sum(size for files in intra.values() for _, _, size in files[1:])
+    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _, _, size in files[1:])
     reclaim = sum(size for _, _, size, _ in dups)
 
     print(f"cache: {root}")
-    if shared:
-        print(f"shared store: {len(shared)} blob(s), {sum(size for _, size in shared.values()):,} bytes")
+    if store_file_count:
+        print(f"shared store: {store_file_count} blob(s), {total_store_bytes:,} bytes")
     else:
         print("no shared blob store found (empty cache or a huggingface_hub older than v1.32)")
-    print(f"per-repo blobs (pre-v1.32 layout): {len(per_repo)} files, {total_readable:,} bytes")
+    print(f"per-repo blobs (pre-v1.32 layout): {per_repo_count} files, {total_readable:,} bytes")
     print(f"duplicates of shared blobs: {len(dups)} file(s), {reclaim:,} bytes reclaimable")
     for repo_name, blob, size, digest in dups[:10]:
         print(f"  {size:>12,} B  {repo_name}/{blob.name}  sha256={digest[:16]}…")
     if len(dups) > 10:
         print(f"  … {len(dups) - 10} more")
-    if intra:
+    if per_repo_dups:
         print(
-            f"same content in {len(intra)} per-repo group(s) (pre-v1.32 duplication, not shared-store overlap): ~{intra_reclaim:,} bytes reclaimable"
+            f"cross-repo / per-repo duplicates in {len(per_repo_dups)} group(s) (not shared-store overlap): ~{per_repo_reclaim:,} bytes reclaimable"
         )
-        for digest, files in list(intra.items())[:10]:
-            total = sum(size for _, _, size in files)
-            print(f"  {total:>12,} B  sha256={digest[:16]}…  in {len(files)} repo caches")
+        for digest, files in list(per_repo_dups.items())[:10]:
+            reclaimable = sum(size for _, _, size in files[1:])
+            print(f"  {reclaimable:>12,} B  sha256={digest[:16]}…  in {len(files)} per-repo blob(s)")
     if errors:
         print(f"unreadable: {len(errors)}")
         for e in errors[:10]:
             print(f"  {e}")
 
-    if not dups and not intra:
+    if not dups and not per_repo_dups:
         return 0
     if not args.apply:
         print(
-            "dry run: pass --apply to hardlink duplicates onto the shared store (and the first copy in each intra-repo group)"
+            "dry run: pass --apply to hardlink duplicates onto the shared store (and the first copy in each cross-repo / per-repo group)"
         )
         return 0
 
     applied_dups = 0
-    applied_intra = 0
+    applied_per_repo = 0
 
-    # Shared-store duplicates first, then intra-repo duplicates.
+    # Shared-store duplicates first, then cross-repo / per-repo duplicates.
     def _link_to(target_path, blob):
         if _same_file(target_path, blob):
             return True
@@ -249,15 +262,15 @@ def run(args):
         target_path, _ = shared[digest]
         applied_dups += _link_to(target_path, blob)
 
-    for files in intra.values():
+    for files in per_repo_dups.values():
         keep = files[0][1]
         for _repo_name, blob, _size in files[1:]:
             if blob == keep:
                 continue
-            applied_intra += _link_to(keep, blob)
+            applied_per_repo += _link_to(keep, blob)
 
     print(
-        f"hardlinked {applied_dups}/{len(dups)} shared-store duplicate(s) and {applied_intra}/{sum(len(f) - 1 for f in intra.values())} intra-repo duplicate(s); ~{reclaim + intra_reclaim:,} bytes reported reclaimable"
+        f"hardlinked {applied_dups}/{len(dups)} shared-store duplicate(s) and {applied_per_repo}/{sum(len(f) - 1 for f in per_repo_dups.values())} cross-repo / per-repo duplicate(s); ~{reclaim + per_repo_reclaim:,} bytes reported reclaimable"
     )
     return 0
 

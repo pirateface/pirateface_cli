@@ -35,17 +35,20 @@ class Adder:
         """found: local_files() of the model torrent whose v1 infohash is v1. label: the model, for a skip's message."""
         for path, root in found:
             self.asked += 1
-            entry = api.file_root(root)
-            if not entry:
-                continue
-            self.listed += 1
-            if all(s["infohash"] == v1 for s in entry["siblings"]):
-                continue  # only in this upload
-            h = entry["infohashV2"]
-            if h in self.known:
-                self.had.add(h)
-            elif h not in self.added and self.add_file(entry, path, verified, label):
-                self.added.add(h)
+            try:
+                entry = api.file_root(root)
+                if not entry:
+                    continue
+                self.listed += 1
+                if all(s["infohash"] == v1 for s in entry["siblings"]):
+                    continue  # only in this upload
+                h = entry["infohashV2"]
+                if h in self.known:
+                    self.had.add(h)
+                elif h not in self.added and self.add_file(entry, path, verified, label):
+                    self.added.add(h)
+            except Exception as e:  # one file's failure must not stop the rest of the batch
+                print(f"    Skipped {label or path.name}: {e}")
 
     def add_file(self, entry, path, verified, label=None):
         name = entry["name"]  # from the first upload that had the file; can differ from yours

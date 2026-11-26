@@ -129,20 +129,23 @@ def _same_file(a, b):
         return False
 
 
-def run(args):
-    root = Path(args.cache) if args.cache else _cache_root()
-    if not root.is_dir():
-        print(f"error: Hugging Face cache not found at {root}", file=sys.stderr)
-        return 1
+def _summarize(entries):
+    """Aggregate per-repo/shared totals over collected entries."""
+    total_readable = sum(size for _p, size, _d, _i, kind, _r in entries if kind == "per_repo")
+    total_store_bytes = sum(size for _p, size, _d, _i, kind, _r in entries if kind == "shared")
+    store_file_count = sum(1 for _p, _s, _d, _i, kind, _r in entries if kind == "shared")
+    per_repo_count = sum(1 for _p, _s, _d, _i, kind, _r in entries if kind == "per_repo")
+    return total_readable, total_store_bytes, store_file_count, per_repo_count
 
-    errors = []
-    entries = _collect_blobs(root, errors)
-    total_readable = sum(size for _path, size, _dev, _ino, kind, _repo in entries if kind == "per_repo")
-    total_store_bytes = sum(size for _path, size, _dev, _ino, kind, _repo in entries if kind == "shared")
-    store_file_count = sum(1 for _path, _size, _dev, _ino, kind, _repo in entries if kind == "shared")
-    per_repo_count = sum(1 for _path, _size, _dev, _ino, kind, _repo in entries if kind == "per_repo")
-    by_digest = defaultdict(list)  # per-repo blobs sharing content
-    shared = {}  # content sha256 -> (store path, size)
+
+def _hash_entries(entries, errors):
+    """Hash pre-filtered entries; return (shared, by_digest).
+
+    shared maps content sha256 -> (store path, size); by_digest maps content
+    sha256 -> [(repo_name, path, size), ...] for per-repo blobs.
+    """
+    by_digest = defaultdict(list)
+    shared = {}
     for path, size, _dev, _ino, kind, repo_name in _hash_candidates(entries):
         try:
             digest = _sha256_file(path)
@@ -153,10 +156,19 @@ def run(args):
             shared[digest] = (path, size)
         else:
             by_digest[digest].append((repo_name, path, size))
+    return shared, by_digest
 
+
+def _find_duplicates(by_digest, shared):
+    """Find shared-store duplicates and cross-repo / per-repo duplicate groups.
+
+    Returns (dups, per_repo_dups): dups is a list of (repo, blob, size, sha256);
+    per_repo_dups maps digest -> [(repo, keep_blob, size), (repo, blob, size), ...]
+    with the keep file first. Blobs already hardlinked to the keep file are excluded.
+    """
     # Shared-store duplicates: per-repo blobs whose content is already in the store.
     # Blobs already hardlinked to the shared blob are not reclaimable.
-    dups = []  # (repo, blob path, size, sha256)
+    dups = []
     for digest, files in by_digest.items():
         target = shared.get(digest)
         if target is None:
@@ -178,10 +190,21 @@ def run(args):
         dup_files = [(r, b, s) for r, b, s in files[1:] if not _same_file(keep_blob, b)]
         if dup_files:
             per_repo_dups[digest] = [files[0], *dup_files]
+    return dups, per_repo_dups
 
-    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _, _, size in files[1:])
-    reclaim = sum(size for _, _, size, _ in dups)
 
+def _print_report(
+    root,
+    store_file_count,
+    total_store_bytes,
+    per_repo_count,
+    total_readable,
+    dups,
+    per_repo_dups,
+    reclaim,
+    per_repo_reclaim,
+    errors,
+):
     print(f"cache: {root}")
     if store_file_count:
         print(f"shared store: {store_file_count} blob(s), {total_store_bytes:,} bytes")
@@ -205,6 +228,97 @@ def run(args):
         for e in errors[:10]:
             print(f"  {e}")
 
+
+def _link_to(target_path, blob):
+    if _same_file(target_path, blob):
+        return True
+    try:
+        before = blob.stat()
+    except OSError as e:
+        print(f"skip {blob}: {e}", file=sys.stderr)
+        return False
+    tmp = blob.with_name(blob.name + ".dedupe-tmp")
+    with contextlib.suppress(OSError):
+        tmp.unlink()
+    try:
+        os.link(target_path, tmp)
+    except OSError as e:
+        print(f"skip {blob}: {e}", file=sys.stderr)
+        return False
+    try:
+        after = blob.stat()
+    except OSError as e:
+        print(f"skip {blob}: {e}", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        return False
+    # The file changed between our check and the link: keep the original.
+    if after.st_ino != before.st_ino or after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
+        print(f"skip {blob}: file changed during dedupe", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        return False
+    try:
+        tmp.replace(blob)
+    except OSError as e:
+        print(f"skip {blob}: {e}", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        return False
+    if not _same_file(target_path, blob):
+        print(f"skip {blob}: replacement did not take effect", file=sys.stderr)
+        return False
+    return True
+
+
+def _apply_dedupe(dups, per_repo_dups, shared, reclaim, per_repo_reclaim):
+    applied_dups = 0
+    applied_per_repo = 0
+
+    # Shared-store duplicates first, then cross-repo / per-repo duplicates.
+    for _repo_name, blob, _size, digest in dups:
+        target_path, _ = shared[digest]
+        applied_dups += _link_to(target_path, blob)
+
+    for files in per_repo_dups.values():
+        keep = files[0][1]
+        for _repo_name, blob, _size in files[1:]:
+            applied_per_repo += _link_to(keep, blob)
+
+    print(
+        f"hardlinked {applied_dups}/{len(dups)} shared-store duplicate(s) and {applied_per_repo}/{sum(len(f) - 1 for f in per_repo_dups.values())} cross-repo / per-repo duplicate(s); ~{reclaim + per_repo_reclaim:,} bytes reported reclaimable"
+    )
+    return applied_dups, applied_per_repo
+
+
+def run(args):
+    root = Path(args.cache) if args.cache else _cache_root()
+    if not root.is_dir():
+        print(f"error: Hugging Face cache not found at {root}", file=sys.stderr)
+        return 1
+
+    errors = []
+    entries = _collect_blobs(root, errors)
+    total_readable, total_store_bytes, store_file_count, per_repo_count = _summarize(entries)
+    shared, by_digest = _hash_entries(entries, errors)
+    dups, per_repo_dups = _find_duplicates(by_digest, shared)
+
+    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _, _, size in files[1:])
+    reclaim = sum(size for _, _, size, _ in dups)
+
+    _print_report(
+        root,
+        store_file_count,
+        total_store_bytes,
+        per_repo_count,
+        total_readable,
+        dups,
+        per_repo_dups,
+        reclaim,
+        per_repo_reclaim,
+        errors,
+    )
+
     if not dups and not per_repo_dups:
         return 0
     if not args.apply:
@@ -213,65 +327,7 @@ def run(args):
         )
         return 0
 
-    applied_dups = 0
-    applied_per_repo = 0
-
-    # Shared-store duplicates first, then cross-repo / per-repo duplicates.
-    def _link_to(target_path, blob):
-        if _same_file(target_path, blob):
-            return True
-        try:
-            before = blob.stat()
-        except OSError as e:
-            print(f"skip {blob}: {e}", file=sys.stderr)
-            return False
-        tmp = blob.with_name(blob.name + ".dedupe-tmp")
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        try:
-            os.link(target_path, tmp)
-        except OSError as e:
-            print(f"skip {blob}: {e}", file=sys.stderr)
-            return False
-        try:
-            after = blob.stat()
-        except OSError as e:
-            print(f"skip {blob}: {e}", file=sys.stderr)
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-            return False
-        # The file changed between our check and the link: keep the original.
-        if after.st_ino != before.st_ino or after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
-            print(f"skip {blob}: file changed during dedupe", file=sys.stderr)
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-            return False
-        try:
-            tmp.replace(blob)
-        except OSError as e:
-            print(f"skip {blob}: {e}", file=sys.stderr)
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-            return False
-        if not _same_file(target_path, blob):
-            print(f"skip {blob}: replacement did not take effect", file=sys.stderr)
-            return False
-        return True
-
-    for _repo_name, blob, _size, digest in dups:
-        target_path, _ = shared[digest]
-        applied_dups += _link_to(target_path, blob)
-
-    for files in per_repo_dups.values():
-        keep = files[0][1]
-        for _repo_name, blob, _size in files[1:]:
-            if blob == keep:
-                continue
-            applied_per_repo += _link_to(keep, blob)
-
-    print(
-        f"hardlinked {applied_dups}/{len(dups)} shared-store duplicate(s) and {applied_per_repo}/{sum(len(f) - 1 for f in per_repo_dups.values())} cross-repo / per-repo duplicate(s); ~{reclaim + per_repo_reclaim:,} bytes reported reclaimable"
-    )
+    _apply_dedupe(dups, per_repo_dups, shared, reclaim, per_repo_reclaim)
     return 0
 
 

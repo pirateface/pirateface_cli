@@ -88,7 +88,8 @@ def _main():
             "  pf work --once               one queued model, from Hugging Face\n"
             "  pf restore PATH              put a .torrent back on a listing\n"
             "  pf index [--sync|--add]      show the cached index, mirror it, or add it to qBittorrent\n"
-            "  pf find-model FILE           what listed models hold this file (sha256)"
+            "  pf find-model FILE           what listed models hold this file (sha256)\n"
+            "  pf dedupe                    find duplicate Hugging Face cache blobs (--apply to hardlink)"
         ),
     )
     from pirateface.client.api import VERSION

@@ -74,7 +74,7 @@ def _collect_blobs(root, errors):
                 except OSError as e:
                     errors.append(f"shared store/{sidedir.name}/{blob.name}: {e}")
                     continue
-                entries.append((blob, st.st_size, st.st_dev, st.st_ino, "shared", None))
+                entries.append((blob, st.st_size, st.st_dev, st.st_ino, "shared", None, st.st_nlink))
     try:
         repos = sorted(root.iterdir())
     except OSError as e:
@@ -104,7 +104,7 @@ def _collect_blobs(root, errors):
             except OSError as e:
                 errors.append(f"{repo.name}: {e}")
                 continue
-            entries.append((blob, st.st_size, st.st_dev, st.st_ino, "per_repo", repo.name))
+            entries.append((blob, st.st_size, st.st_dev, st.st_ino, "per_repo", repo.name, st.st_nlink))
     return entries
 
 
@@ -116,9 +116,9 @@ def _hash_candidates(entries):
     would read hundreds of GB of unique-sized weights for nothing.
     """
     sizes = defaultdict(set)  # size -> set of (dev, ino)
-    for _path, size, dev, ino, _kind, _repo in entries:
+    for _path, size, dev, ino, _kind, _repo, _nlink in entries:
         sizes[size].add((dev, ino))
-    return [(p, s, d, i, k, r) for p, s, d, i, k, r in entries if len(sizes[s]) >= 2]
+    return [(p, s, d, i, k, r, n) for p, s, d, i, k, r, n in entries if len(sizes[s]) >= 2]
 
 
 def _same_file(a, b):
@@ -131,10 +131,10 @@ def _same_file(a, b):
 
 def _summarize(entries):
     """Aggregate per-repo/shared totals over collected entries."""
-    total_readable = sum(size for _p, size, _d, _i, kind, _r in entries if kind == "per_repo")
-    total_store_bytes = sum(size for _p, size, _d, _i, kind, _r in entries if kind == "shared")
-    store_file_count = sum(1 for _p, _s, _d, _i, kind, _r in entries if kind == "shared")
-    per_repo_count = sum(1 for _p, _s, _d, _i, kind, _r in entries if kind == "per_repo")
+    total_readable = sum(size for _p, size, _d, _i, kind, _r, _n in entries if kind == "per_repo")
+    total_store_bytes = sum(size for _p, size, _d, _i, kind, _r, _n in entries if kind == "shared")
+    store_file_count = sum(1 for _p, _s, _d, _i, kind, _r, _n in entries if kind == "shared")
+    per_repo_count = sum(1 for _p, _s, _d, _i, kind, _r, _n in entries if kind == "per_repo")
     return total_readable, total_store_bytes, store_file_count, per_repo_count
 
 
@@ -146,24 +146,24 @@ def _hash_entries(entries, errors):
     """
     by_digest = defaultdict(list)
     shared = {}
-    for path, size, _dev, _ino, kind, repo_name in _hash_candidates(entries):
+    for path, size, _dev, _ino, kind, repo_name, nlink in _hash_candidates(entries):
         try:
             digest = _sha256_file(path)
         except OSError as e:
             errors.append(f"{repo_name or 'shared store'}: {e}")
             continue
         if kind == "shared":
-            shared[digest] = (path, size)
+            shared[digest] = (path, size, nlink)
         else:
-            by_digest[digest].append((repo_name, path, size))
+            by_digest[digest].append((repo_name, path, size, nlink))
     return shared, by_digest
 
 
 def _find_duplicates(by_digest, shared):
     """Find shared-store duplicates and cross-repo / per-repo duplicate groups.
 
-    Returns (dups, per_repo_dups): dups is a list of (repo, blob, size, sha256);
-    per_repo_dups maps digest -> [(repo, keep_blob, size), (repo, blob, size), ...]
+    Returns (dups, per_repo_dups): dups is a list of (repo, blob, size, sha256, nlink);
+    per_repo_dups maps digest -> [(repo, keep_blob, size, nlink), (repo, blob, size, nlink), ...]
     with the keep file first. Blobs already hardlinked to the keep file are excluded.
     """
     # Shared-store duplicates: per-repo blobs whose content is already in the store.
@@ -173,11 +173,11 @@ def _find_duplicates(by_digest, shared):
         target = shared.get(digest)
         if target is None:
             continue
-        target_path, _target_size = target
-        for repo_name, blob, size in files:
+        target_path, _target_size, _target_nlink = target
+        for repo_name, blob, size, nlink in files:
             if _same_file(target_path, blob):
                 continue
-            dups.append((repo_name, blob, size, digest))
+            dups.append((repo_name, blob, size, digest, nlink))
 
     # Cross-repo / per-repo duplicates: same content across per-repo blobs, not
     # already covered by the shared store. Skip blobs already hardlinked to the keep file.
@@ -187,7 +187,7 @@ def _find_duplicates(by_digest, shared):
             continue
         files = sorted(files, key=lambda f: (f[0], str(f[1])))
         keep_blob = files[0][1]
-        dup_files = [(r, b, s) for r, b, s in files[1:] if not _same_file(keep_blob, b)]
+        dup_files = [(r, b, s, n) for r, b, s, n in files[1:] if not _same_file(keep_blob, b)]
         if dup_files:
             per_repo_dups[digest] = [files[0], *dup_files]
     return dups, per_repo_dups
@@ -203,6 +203,10 @@ def _print_report(
     per_repo_dups,
     reclaim,
     per_repo_reclaim,
+    pinned_dup_files,
+    pinned_dup_bytes,
+    pinned_per_repo_files,
+    pinned_per_repo_bytes,
     errors,
 ):
     print(f"cache: {root}")
@@ -212,17 +216,26 @@ def _print_report(
         print("no shared blob store found (empty cache or a huggingface_hub older than v1.32)")
     print(f"per-repo blobs (pre-v1.32 layout): {per_repo_count} files, {total_readable:,} bytes")
     print(f"duplicates of shared blobs: {len(dups)} file(s), {reclaim:,} bytes reclaimable")
-    for repo_name, blob, size, digest in dups[:10]:
-        print(f"  {size:>12,} B  {repo_name}/{blob.name}  sha256={digest[:16]}…")
+    for repo_name, blob, size, digest, nlink in dups[:10]:
+        pin = "  (pinned)" if nlink > 1 else ""
+        print(f"  {size:>12,} B  {repo_name}/{blob.name}  sha256={digest[:16]}…{pin}")
     if len(dups) > 10:
         print(f"  … {len(dups) - 10} more")
+    if pinned_dup_files:
+        print(
+            f"  pinned by other hardlinks: {pinned_dup_files} file(s), {pinned_dup_bytes:,} bytes — left as-is, 0 bytes reclaimable"
+        )
     if per_repo_dups:
         print(
             f"cross-repo / per-repo duplicates in {len(per_repo_dups)} group(s) (not shared-store overlap): ~{per_repo_reclaim:,} bytes reclaimable"
         )
         for digest, files in list(per_repo_dups.items())[:10]:
-            reclaimable = sum(size for _, _, size in files[1:])
+            reclaimable = sum(size for _, _, size, nlink in files[1:] if nlink <= 1)
             print(f"  {reclaimable:>12,} B  sha256={digest[:16]}…  in {len(files)} per-repo blob(s)")
+        if pinned_per_repo_files:
+            print(
+                f"  pinned by other hardlinks: {pinned_per_repo_files} file(s), {pinned_per_repo_bytes:,} bytes — left as-is, 0 bytes reclaimable"
+            )
     if errors:
         print(f"unreadable: {len(errors)}")
         for e in errors[:10]:
@@ -271,23 +284,33 @@ def _link_to(target_path, blob):
     return True
 
 
-def _apply_dedupe(dups, per_repo_dups, shared, reclaim, per_repo_reclaim):
+def _apply_dedupe(dups, per_repo_dups, shared, reclaim, per_repo_reclaim, pinned_dup_files, pinned_per_repo_files):
     applied_dups = 0
     applied_per_repo = 0
 
     # Shared-store duplicates first, then cross-repo / per-repo duplicates.
-    for _repo_name, blob, _size, digest in dups:
-        target_path, _ = shared[digest]
+    # Pinning blobs (another hardlink keeps the old inode alive) reclaim 0 bytes: leave them.
+    unpinned_dups = [d for d in dups if d[4] <= 1]
+    for _repo_name, blob, _size, digest, _nlink in unpinned_dups:
+        target_path, _, _ = shared[digest]
         applied_dups += _link_to(target_path, blob)
 
-    for files in per_repo_dups.values():
+    unpinned_groups = []
+    for digest, files in per_repo_dups.items():
         keep = files[0][1]
-        for _repo_name, blob, _size in files[1:]:
+        dup_files = [(r, b, s, n) for r, b, s, n in files[1:] if n <= 1]
+        unpinned_groups.append((digest, files[0], dup_files))
+        for _repo_name, blob, _size, _nlink in dup_files:
             applied_per_repo += _link_to(keep, blob)
 
+    total_unpinned_per_repo = sum(len(dups_) for _d, _k, dups_ in unpinned_groups)
     print(
-        f"hardlinked {applied_dups}/{len(dups)} shared-store duplicate(s) and {applied_per_repo}/{sum(len(f) - 1 for f in per_repo_dups.values())} cross-repo / per-repo duplicate(s); ~{reclaim + per_repo_reclaim:,} bytes reported reclaimable"
+        f"hardlinked {applied_dups}/{len(unpinned_dups)} shared-store duplicate(s) and {applied_per_repo}/{total_unpinned_per_repo} cross-repo / per-repo duplicate(s); ~{reclaim + per_repo_reclaim:,} bytes reported reclaimable"
     )
+    if pinned_dup_files or pinned_per_repo_files:
+        print(
+            f"left {pinned_dup_files + pinned_per_repo_files} pinned file(s) as-is (other hardlinks keep their inodes alive)"
+        )
     return applied_dups, applied_per_repo
 
 
@@ -303,8 +326,22 @@ def run(args):
     shared, by_digest = _hash_entries(entries, errors)
     dups, per_repo_dups = _find_duplicates(by_digest, shared)
 
-    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _, _, size in files[1:])
-    reclaim = sum(size for _, _, size, _ in dups)
+    # Blobs with st_nlink > 1 are pinned by another hardlink (e.g. SEEDS/): the
+    # inode survives the replacement, so the reclaim is honestly 0. Report them,
+    # leave them alone, and never count them as reclaimable.
+    pinned_dups = [d for d in dups if d[4] > 1]
+    reclaim = sum(size for _r, _b, size, _dg, _nl in dups if _nl <= 1)
+    pinned_per_repo = [
+        (digest, blob, size)
+        for digest, files in per_repo_dups.items()
+        for _r, blob, size, nlink in files[1:]
+        if nlink > 1
+    ]
+    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _r, _b, size, nlink in files[1:] if nlink <= 1)
+    pinned_dup_files = len(pinned_dups)
+    pinned_dup_bytes = sum(size for _r, _b, size, _dg, _nl in pinned_dups)
+    pinned_per_repo_files = len(pinned_per_repo)
+    pinned_per_repo_bytes = sum(size for _dg, _b, size in pinned_per_repo)
 
     _print_report(
         root,
@@ -316,8 +353,13 @@ def run(args):
         per_repo_dups,
         reclaim,
         per_repo_reclaim,
+        pinned_dup_files,
+        pinned_dup_bytes,
+        pinned_per_repo_files,
+        pinned_per_repo_bytes,
         errors,
     )
+    print("tip: pf seed --from-cache seeds cached models straight from the cache with 0 extra disk")
 
     if not dups and not per_repo_dups:
         return 0
@@ -327,7 +369,15 @@ def run(args):
         )
         return 0
 
-    _apply_dedupe(dups, per_repo_dups, shared, reclaim, per_repo_reclaim)
+    _apply_dedupe(
+        dups,
+        per_repo_dups,
+        shared,
+        reclaim,
+        per_repo_reclaim,
+        pinned_dup_files,
+        pinned_per_repo_files,
+    )
     return 0
 
 

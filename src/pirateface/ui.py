@@ -99,6 +99,7 @@ def not_on_pirateface(repo_id, rescue_requested=False):
     if rescue_requested:
         line += "  · requested a rescue (turn off: PF_NO_RESCUE=1)"
     note("hf", line)
+    note("next", f"pf seed {repo_id}  packages and submits it, seeding you and the swarm")
 
 
 def repo_progress(repo_id):

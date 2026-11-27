@@ -44,7 +44,6 @@ STATE = DIR / "state.json"
 _sync_lock = threading.Lock()
 
 __all__ = [
-    "BOOTSTRAP_MAGNET",
     "broken",
     "build",
     "count",

@@ -35,6 +35,16 @@ def _is_regular_file(path):
         return False
 
 
+def _stat_entry(blob, errors, where, kind, repo_name):
+    """(path, size, dev, ino, kind, repo_name, nlink) for blob, or None if it cannot be stat'd."""
+    try:
+        st = blob.stat()
+    except OSError as e:
+        errors.append(f"{where}: {e}")
+        return None
+    return (blob, st.st_size, st.st_dev, st.st_ino, kind, repo_name, st.st_nlink)
+
+
 def _collect_blobs(root, errors):
     """Collect (path, size, dev, ino, kind, repo_name) for every real blob.
 
@@ -60,12 +70,9 @@ def _collect_blobs(root, errors):
             for blob in side_entries:
                 if not DIGEST.fullmatch(blob.name) or not _is_regular_file(blob):
                     continue
-                try:
-                    st = blob.stat()
-                except OSError as e:
-                    errors.append(f"shared store/{sidedir.name}/{blob.name}: {e}")
-                    continue
-                entries.append((blob, st.st_size, st.st_dev, st.st_ino, "shared", None, st.st_nlink))
+                entry = _stat_entry(blob, errors, f"shared store/{sidedir.name}/{blob.name}", "shared", None)
+                if entry:
+                    entries.append(entry)
     try:
         repos = sorted(root.iterdir())
     except OSError as e:
@@ -90,12 +97,9 @@ def _collect_blobs(root, errors):
                 continue
             if not _is_regular_file(blob):
                 continue
-            try:
-                st = blob.stat()
-            except OSError as e:
-                errors.append(f"{repo.name}: {e}")
-                continue
-            entries.append((blob, st.st_size, st.st_dev, st.st_ino, "per_repo", repo.name, st.st_nlink))
+            entry = _stat_entry(blob, errors, repo.name, "per_repo", repo.name)
+            if entry:
+                entries.append(entry)
     return entries
 
 

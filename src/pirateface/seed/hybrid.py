@@ -47,15 +47,22 @@ def piece_length(total_size):
     return 1 << exp
 
 
+def _merkle_levels(layer, pad, width):
+    """The block-hash tree over layer, padded to width (a power of two): leaves first."""
+    layer = layer + [pad] * (width - len(layer))
+    levels = [layer]
+    while len(layer) > 1:
+        layer = [hashlib.sha256(layer[i] + layer[i + 1]).digest() for i in range(0, len(layer), 2)]
+        levels.append(layer)
+    return levels
+
+
 def _merkle(layer, pad):
     """Pad the layer to a power of two, then hash pairs up to the root."""
     n = 1
     while n < len(layer):
         n *= 2
-    layer = layer + [pad] * (n - len(layer))
-    while len(layer) > 1:
-        layer = [hashlib.sha256(layer[i] + layer[i + 1]).digest() for i in range(0, len(layer), 2)]
-    return layer[0]
+    return _merkle_levels(layer, pad, n)[-1][0]
 
 
 class _V1Pieces:

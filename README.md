@@ -1,6 +1,6 @@
 # Pirate Face CLI
 
-Downloads HF models over BitTorrent from [Pirate Face](https://pirateface.co) seeders. Your code stays the same.
+Downloads HF models over BitTorrent from [Pirate Face](https://pirateface.co) seeders.
 
 ## Install
 

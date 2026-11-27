@@ -9,6 +9,7 @@ and never a guess.
 import sys
 from pathlib import Path
 
+from pirateface import ui
 from pirateface._hash import sha256_file
 from pirateface.client.api import Unreachable, Unreadable, rows_by_sha256
 
@@ -49,7 +50,7 @@ def find(path, out=sys.stdout):
         return 1
     for row in rows:
         row_size = row.get("length")
-        size_s = f"{row_size / 1e9:.2f} GB" if isinstance(row_size, int) and row_size >= 0 else "?"
+        size_s = ui.gb(row_size) if isinstance(row_size, int) and row_size >= 0 else "?"
         info = str(row.get("infohash") or "")
         info_s = info[:12] if info else "?"
         print(f"{row['repoId']}  {row['path']}  ({size_s}, {info_s})", file=out)

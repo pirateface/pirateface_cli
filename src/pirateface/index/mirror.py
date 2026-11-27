@@ -13,6 +13,7 @@ import threading
 import time
 from pathlib import Path
 
+from pirateface._atomic import write_bytes
 from pirateface._hash import sha256_file
 from pirateface.client import api, torrent
 from pirateface.index import FILE, INDEX_REPO
@@ -86,14 +87,7 @@ def state():
 
 
 def _write_state(**fields):
-    DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATE.with_name(STATE.name + ".part")
-    try:
-        tmp.write_text(json.dumps(fields, indent=1, sort_keys=True), encoding="utf-8")
-        tmp.replace(STATE)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_bytes(STATE, json.dumps(fields, indent=1, sort_keys=True).encode("utf-8"))
 
 
 def _digest(path):

@@ -23,9 +23,6 @@ class LeaseFailed:
     error: WorkError
 
 
-LeaseSnapshot = LeaseRunning | LeaseFailed
-
-
 @dataclass(frozen=True)
 class GraceWindow:
     """The RENEW_UNREACHABLE_SECONDS grace window around an unanswered renewal. Opens on the first
@@ -57,10 +54,6 @@ class Lease:
         self._grace = GraceWindow()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._renew_loop, daemon=True)
-
-    @property
-    def state(self) -> LeaseSnapshot:
-        return self._snapshot
 
     def _renew_loop(self):
         while not self._stop.wait(RENEW_SECONDS):

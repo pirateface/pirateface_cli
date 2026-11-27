@@ -21,7 +21,6 @@ from pirateface.index.shards import (
     _SHARD,
     DIR,
     SHARDS,
-    Entry,
     _parsed,
     broken,
     build,
@@ -46,7 +45,6 @@ _sync_lock = threading.Lock()
 
 __all__ = [
     "BOOTSTRAP_MAGNET",
-    "Entry",
     "broken",
     "build",
     "count",

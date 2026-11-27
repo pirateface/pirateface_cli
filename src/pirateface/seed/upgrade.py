@@ -124,7 +124,8 @@ def upgrade_one(qbt, key, repo, infohash=None, report=True):
     print(f"    Listed in place of the v1 torrent: {API}/{repo}")
     if not qbt.has(new_v1):  # a rerun after the site took it
         qbt.add(data, entry["save_path"], skip_checking=True)  # every byte was just hashed
-    qbt.remove(entry["hash"])
+    if not entry.get("infohash_v2"):  # only v1-only entries; never drop a hybrid
+        qbt.remove(entry["hash"])
     print(f"    Seeding the hybrid ({new_v1}) from the same files; the v1 torrent is out of qBittorrent.")
     print("    Seeders of the old torrent get told to switch: pf seed --upgrade")
     return seed_model(data, entry["save_path"], new_v1, verified=True, label=repo, report=report)

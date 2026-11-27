@@ -9,7 +9,7 @@ from typing import Any
 
 from pirateface import ui
 from pirateface.client import api
-from pirateface.config import API, MAX_UPLOAD_BYTES, flag
+from pirateface.config import API, MAX_UPLOAD_BYTES, TORRENT_OVERSIZE_MESSAGE, flag
 from pirateface.seed import hybrid, proofs, user
 from pirateface.work import build, site, state
 from pirateface.work.errors import LeaseLost, Oversize, WorkError, WorkUnreachable
@@ -110,7 +110,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
                     job, key, trackers, name, blocks, max_download_rate, saved=saved_checkpoint
                 )
                 if len(data) > MAX_UPLOAD_BYTES:
-                    raise user.SeedError("the .torrent is over the 3 MB upload limit")
+                    raise user.SeedError(TORRENT_OVERSIZE_MESSAGE)
                 block_proofs = proofs.answer(key, data, blocks)
                 return data, manifest, infohash, block_proofs
 

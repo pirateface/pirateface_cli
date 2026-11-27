@@ -47,7 +47,7 @@ class Transmission:
         self.rpc("torrent-add", {"metainfo": base64.b64encode(data).decode(), "download-dir": str(save_dir)})
 
     def update_trackers(self, mine):
-        def mutate(t, urls):
+        def mutate(t, _urls):
             trackers = t["trackers"]
             keep = [x for x in trackers if not KEYED.match(x["announce"])]  # a key replaced at /account
             if self.version >= 17:  # Transmission 4: trackerList, one tier per blank-line block

@@ -32,21 +32,23 @@ class QBittorrent:
                 raise LoginRefused("qBittorrent refused the login: check QBT_USER and QBT_PASS") from e
             raise
 
-    def call(self, path, form=None, body=None, content_type=None, text=True):
+    def call(self, path, form=None, body=None, content_type=None, text=True, timeout=30):
         if form is not None:
             body = urllib.parse.urlencode(form).encode()
         req = _http_request(self.base + "/api/v2/" + path, data=body)
         if content_type:
             req.add_header("Content-Type", content_type)
-        with self.op.open(req, timeout=30) as r:
+        with self.op.open(req, timeout=timeout) as r:
             data = r.read()
         return data.decode() if text else data
 
-    def torrents(self):
-        return json.loads(self.call("torrents/info"))
+    def torrents(self, timeout=30):
+        return json.loads(self.call("torrents/info", timeout=timeout))
 
-    def trackers(self, h):
-        return [x["url"] for x in json.loads(self.call("torrents/trackers?hash=" + h)) if "://" in x["url"]]
+    def trackers(self, h, timeout=30):
+        return [
+            x["url"] for x in json.loads(self.call("torrents/trackers?hash=" + h, timeout=timeout)) if "://" in x["url"]
+        ]
 
     def torrents_named(self, name):
         """(save folder, tracker URLs, file paths inside the torrent) of each torrent called name."""

@@ -4,18 +4,45 @@ With a repo (its uploader): rebuild your v1 torrent of it as a hybrid from the c
 paths, and have Pirate Face list it in place of the old one. Then seed it at once from the same files, drop the old
 torrent (files stay) and add the per-file swarms. With --mine (its uploader too): the same for every listed v1
 torrent you submitted that has a complete copy in qBittorrent, in one command, reporting the ones it could not.
-Without a repo (any seeder): switch every torrent in qBittorrent that Pirate Face replaced this way to its
-replacement, so you keep seeding the swarm that is listed."""
+Without a repo (any seeder): switch every v1-only Pirate Face torrent in qBittorrent that Pirate Face replaced
+to its replacement, so you keep seeding the swarm that is listed."""
 
 import base64
+import http.client
+import time
 from pathlib import Path
 
 from pirateface import ui
 from pirateface.client import api, torrent
 from pirateface.config import API
 from pirateface.seed import clients, hybrid, package, user
+from pirateface.seed.clients.common import LoginRefused
 from pirateface.seed.per_file.command import NEEDS_QBITTORRENT, qbittorrent, seed_model
 from pirateface.seed.user import SeedError
+
+# The nudge is a note, not a wait: a slow or down client or site must never hold up `pf seed`.
+# Two bounds keep it fast, and together they cover every call the nudge makes:
+#   NUDGE_CALL_TIMEOUT — one HTTP request may not take longer than this;
+#   NUDGE_TOTAL_BUDGET — the whole scan, every torrent, may not take longer than this either.
+# The budget is checked before each call; the per-call timeout is the smaller of the cap and the
+# remaining budget, so no call can outlive the total budget. A spent budget stops the scan with the
+# pairs found so far.
+NUDGE_CALL_TIMEOUT = 5.0
+NUDGE_TOTAL_BUDGET = 10.0
+
+
+class _ScanBudget:
+    """One nudge scan's wall-clock budget."""
+
+    def __init__(self, seconds):
+        self._deadline = time.monotonic() + seconds
+
+    def call_timeout(self, per_call):
+        """Timeout for one call: the per-call cap, or the left-over budget if smaller."""
+        return max(0.0, min(per_call, self._deadline - time.monotonic()))
+
+    def expired(self):
+        return self._deadline - time.monotonic() <= 0
 
 
 def _qbittorrent():
@@ -160,12 +187,66 @@ def upgrade_mine():
     _report_mine(done, already, upgraded, problems)
 
 
-def replacement(qbt, t):
+def replacement(qbt, t, timeout=15):
     """The site's record of a v1-only Pirate Face torrent in qBittorrent if it was replaced, else None."""
-    if t.get("infohash_v2") or not clients.is_pirateface(qbt.trackers(t["hash"])):
+    if t.get("infohash_v2") or not clients.is_pirateface(qbt.trackers(t["hash"], timeout=timeout)):
         return None
-    status = api.torrent_status(t.get("infohash_v1") or t["hash"])
-    return status if status and status.get("status") == "superseded" and status.get("supersededBy") else None
+    status = api.torrent_status(t.get("infohash_v1") or t["hash"], timeout=timeout)
+    return (
+        status
+        if isinstance(status, dict) and status.get("status") == "superseded" and status.get("supersededBy")
+        else None
+    )
+
+
+def _matching(torrents, name):
+    """Only the client torrents worth nudging about: the one called name, if given."""
+    if not isinstance(torrents, list):
+        return []
+    return [t for t in torrents if isinstance(t, dict) and (name is None or t.get("name") == name)]
+
+
+def _superseded(qbt, torrent, budget):
+    """One client entry's replaced record, or None. The per-call timeout is the budget's: the whole scan
+    may not outlive NUDGE_TOTAL_BUDGET."""
+    return replacement(qbt, torrent, timeout=budget.call_timeout(NUDGE_CALL_TIMEOUT))
+
+
+def superseded_in_client(repo=None, name=None):
+    """(entry, status) pairs of the v1-only Pirate Face torrents in qBittorrent that Pirate Face replaced,
+    optionally only those called name (a repo's torrent) and only those for repo.
+    Best-effort: client or site failures, or a spent budget, yield the pairs found so far — the
+    nudge is a note, never a wait."""
+    try:
+        qbt = _qbittorrent()
+        budget = _ScanBudget(NUDGE_TOTAL_BUDGET)
+        torrents = _matching(qbt.torrents(timeout=budget.call_timeout(NUDGE_CALL_TIMEOUT)), name)
+    except (SeedError, LoginRefused, OSError, http.client.HTTPException, ValueError, KeyError):
+        return []
+    found = []
+    for t in torrents:
+        if budget.expired():
+            break
+        try:
+            status = _superseded(qbt, t, budget)
+        except (SeedError, LoginRefused, KeyError, OSError, http.client.HTTPException, ValueError, TypeError):
+            continue
+        if not status:
+            continue
+        if repo is not None and status.get("repo") != repo:
+            continue
+        found.append((t, status))
+    return found
+
+
+def nudge(repo=None, name=None):
+    """Best-effort note, never fatal: the client holds superseded torrents and how to switch them."""
+    entries = superseded_in_client(repo, name)
+    if not entries:
+        return
+    repos = sorted({s["repo"] for _, s in entries if isinstance(s.get("repo"), str) and s["repo"]})
+    names = ", ".join(repos) if repos else "your torrents"
+    print(f"    {len(entries)} superseded torrent(s) in qBittorrent ({names}): switch with: pf seed --upgrade")
 
 
 def switch(qbt, t, status, trackers):

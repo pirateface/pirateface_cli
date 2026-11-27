@@ -80,6 +80,7 @@ def seed_listed(repo, src, key, per_file=False):
     torrent_path.write_bytes(data)
     rest = "" if have == len(paths) else "; the client downloads the rest"
     print(f"==> {repo} is on Pirate Face. You have {have} of its {len(paths)} files{rest}.")
+    upgrade.nudge(repo, name)
     submit.start_seeding(repo, data, save_dir, v1, v2, name, trackers, torrent_path, wait=False, per_file=per_file)
     if per_file:
         seed_model(data, save_dir, v1, label=repo)
@@ -120,6 +121,7 @@ def update_trackers():
     except RuntimeError as e:
         raise SeedError(str(e)) from e
     print("    Done. Pirate Face counts your seeding from the next announce (within 10 minutes).")
+    upgrade.nudge()
 
 
 def run(args):

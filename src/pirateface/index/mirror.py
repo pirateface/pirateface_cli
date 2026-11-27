@@ -7,13 +7,11 @@ cannot be reached, so a model can still be downloaded instead of falling back to
 """
 
 import json
-import os
-import shutil
 import threading
 import time
 from pathlib import Path
 
-from pirateface._atomic import write_bytes
+from pirateface._atomic import copy_file, write_bytes
 from pirateface._hash import sha256_file
 from pirateface.client import api, torrent
 from pirateface.index import FILE, INDEX_REPO
@@ -175,13 +173,7 @@ def sync():
                         digests[name] = _digest(dest)
                     continue
                 src = torrent.fetch_file(INDEX_REPO, path, magnet=magnet)
-                tmp = dest.with_name(f"{dest.name}.{os.getpid()}.part")
-                try:
-                    shutil.copyfile(src, tmp)
-                    tmp.replace(dest)
-                except BaseException:
-                    tmp.unlink(missing_ok=True)
-                    raise
+                copy_file(src, dest)
                 digests[name] = _digest(dest)
         finally:
             # However far it got, what resolve() reads must be what is on disk now.

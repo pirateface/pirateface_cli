@@ -30,7 +30,7 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
     if blocks is not None:
         if not done and partial is None and state.blocks_path(name).exists() and state.blocks_path(name).stat().st_size:
             print("    Discarding incomplete block hashes; no finished file was checkpointed.")
-        kept = [(f["path"], -(-f["size"] // hybrid.BLOCK)) for f in done]
+        kept = [(f["path"], hybrid.ceil_blocks(f["size"])) for f in done]
         if partial:
             kept.append((partial["path"], partial["offset"] // hybrid.BLOCK))
         blocks.keep(kept)

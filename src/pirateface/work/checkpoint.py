@@ -7,7 +7,7 @@ import json
 
 from pirateface._atomic import write_bytes
 from pirateface.seed import user
-from pirateface.seed.hybrid import BLOCK, torrent_order
+from pirateface.seed.hybrid import BLOCK, ceil_blocks, torrent_order
 
 STATE_FILE = user.KEY_FILE.parent / "work-lease.json"
 
@@ -102,7 +102,7 @@ def load_progress(job, plen, proofs, name=None):
                 raise ValueError("invalid partial v2 roots")
             if len(bytes.fromhex(partial["sha256"])) != 40:
                 raise ValueError("invalid partial SHA-256 state")
-        need = 32 * (sum(-(-f["size"] // BLOCK) for f in done) + (partial["offset"] // BLOCK if partial else 0))
+        need = 32 * (sum(ceil_blocks(f["size"]) for f in done) + (partial["offset"] // BLOCK if partial else 0))
         if proofs and need and blocks_path(name).stat().st_size < need:
             raise ValueError("saved block hashes are incomplete")
         return done, partial

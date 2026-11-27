@@ -8,8 +8,7 @@ REPO_LINE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(?:\s|$)")
 # author/model parsed out of the site's own answers (stricter form: alnum start, 1-96 chars per part).
 REPO_STRICT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
 
-# 40-character commit ids: lowercase-only (index mirror) and any case (submissions).
-COMMIT_LOWER = re.compile(r"[0-9a-f]{40}")
+# 40-character commit ids, any case (submissions).
 COMMIT_ANY = re.compile(r"[0-9a-fA-F]{40}")
 
 # File-shape regexes for the seed flow.

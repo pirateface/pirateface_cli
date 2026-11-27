@@ -12,12 +12,13 @@ valid as hardlinks.
 """
 
 import contextlib
-import hashlib
 import os
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+from pirateface._hash import sha256_file
 
 DEFAULT_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 
@@ -28,13 +29,6 @@ def _cache_root():
     raw = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
     return Path(raw) if raw else DEFAULT_CACHE
 
-
-def _sha256_file(path):
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _is_regular_file(path):
@@ -148,7 +142,7 @@ def _hash_entries(entries, errors):
     shared = {}
     for path, size, _dev, _ino, kind, repo_name, nlink in _hash_candidates(entries):
         try:
-            digest = _sha256_file(path)
+            digest = sha256_file(path)
         except OSError as e:
             errors.append(f"{repo_name or 'shared store'}: {e}")
             continue

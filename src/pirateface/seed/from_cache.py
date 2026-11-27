@@ -1,7 +1,6 @@
 """Seed listed model torrents from content-addressed Hugging Face and Ollama caches."""
 
 import functools
-import hashlib
 import json
 import os
 import re
@@ -11,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from tqdm.auto import tqdm
 
+from pirateface._hash import sha256_file
 from pirateface._regex import REPO_LINE
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
@@ -154,8 +154,7 @@ def _source_for(path, digest, size, blobs, snapshots):
 
 @functools.cache
 def _sha256(path):
-    with Path(path).open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+    return sha256_file(path)
 
 
 def _candidate(repo, quant, entry, data, blobs, snapshots):

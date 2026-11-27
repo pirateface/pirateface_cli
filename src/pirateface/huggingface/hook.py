@@ -5,12 +5,12 @@ import contextvars
 import functools
 import hashlib
 import inspect
-import re
 import sys
 import tempfile
 from pathlib import Path
 
 from pirateface import config, ui
+from pirateface._regex import DIGEST
 from pirateface.client import api, torrent
 from pirateface.huggingface import transport
 from pirateface.index import mirror
@@ -154,7 +154,7 @@ def _from_index(repo_id, filename, dest, etag, answered=None):
     # Checked before the download, and on the shape _place_checked can compare -- it compares against
     # hexdigest(), which is lowercase, so normalise here rather than fetching a file that cannot match.
     etag = _etag_hex(etag).lower()
-    if not torrent_checked and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", etag):
+    if not torrent_checked and not DIGEST.fullmatch(etag):
         raise torrent.Unavailable("Hugging Face gave no fingerprint to check the index's copy against")
     try:
         # Hugging Face can take the file if the swarm stalls, unless the index stood in for it.

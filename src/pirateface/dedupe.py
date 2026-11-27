@@ -30,7 +30,6 @@ def _cache_root():
     return Path(raw) if raw else DEFAULT_CACHE
 
 
-
 def _is_regular_file(path):
     try:
         return path.lstat().st_mode & 0o170000 == 0o100000

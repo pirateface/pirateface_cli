@@ -70,6 +70,11 @@ def layer_block(rows, nxt=None):
         aligned(rows)
 
 
+def gb(n):
+    """A byte count as a decimal-GB string with two decimals (the work/seeding progress unit)."""
+    return f"{n / 1e9:.2f} GB"
+
+
 def mb(n):
     if n >= 1e9:
         return f"{n / 1e9:.1f} GB"

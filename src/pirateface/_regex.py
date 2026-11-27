@@ -11,6 +11,9 @@ REPO_STRICT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9
 # 40-character commit ids, any case (submissions).
 COMMIT_ANY = re.compile(r"[0-9a-fA-F]{40}")
 
+# sha1 or sha256 digests (lowercase): the file fingerprint shape Hugging Face names.
+DIGEST = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
 # File-shape regexes for the seed flow.
 WEIGHT = re.compile(r"\.(safetensors|gguf|onnx|bin|pt|pth|ckpt|mlx|npz)$", re.IGNORECASE)  # as the site keys a quant
 SHARD = re.compile(r"-\d{5}-of-(\d{5})\.gguf$")

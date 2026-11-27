@@ -13,16 +13,14 @@ valid as hardlinks.
 
 import contextlib
 import os
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 from pirateface._hash import sha256_file
+from pirateface._regex import DIGEST
 
 DEFAULT_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
-
-_BLOB_NAME = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _cache_root():
@@ -60,7 +58,7 @@ def _collect_blobs(root, errors):
                 errors.append(f"shared store/{sidedir.name}: {e}")
                 continue
             for blob in side_entries:
-                if not _BLOB_NAME.fullmatch(blob.name) or not _is_regular_file(blob):
+                if not DIGEST.fullmatch(blob.name) or not _is_regular_file(blob):
                     continue
                 try:
                     st = blob.stat()

@@ -18,10 +18,6 @@ WORK_BACKOFF_MIN = 30  # the first pause after a failed lease poll or a failed j
 WORK_BACKOFF_MAX = 300  # cap: the site keeps a lease for 10 minutes, so a 5-minute pause is safe
 
 
-def _gb(n):
-    return f"{n / 1e9:.2f} GB"
-
-
 @dataclass(frozen=True)
 class Backoff:
     """The pause both failure arms share. A site answer resets it; a failure doubles it up to the cap."""
@@ -87,7 +83,7 @@ def _job_size(job, max_bytes):
         # client refuses it rather than streaming gigabytes nobody asked for. The lease is kept to lapse on its
         # own: given back, the same row would be offered again at once. This costs the wait, not the data.
         raise Oversize(
-            f"{job['repoId']} is {_gb(total)}, over the {max_bytes / 1024**3:.0f} GiB cap this run "
+            f"{job['repoId']} is {ui.gb(total)}, over the {max_bytes / 1024**3:.0f} GiB cap this run "
             f"asked for: not downloaded. Raise --max-size, or leave it off, to take jobs this size"
         )
     return total
@@ -99,7 +95,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         [
             ("revision", job["revision"][:12]),
             ("files", str(len(job["files"]))),
-            ("size", _gb(total)),
+            ("size", ui.gb(total)),
             ("leased", job["repoId"]),
         ]
     )

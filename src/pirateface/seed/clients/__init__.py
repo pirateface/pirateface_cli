@@ -4,17 +4,14 @@ The two implementations live in transmission.py and qbittorrent.py; the shared r
 regexes and the help line in common.py. This module is the facade every caller imports.
 """
 
-from pirateface.seed.clients.common import HELP, KEYED, PIRATEFACE, LoginRefused, is_pirateface
+from pirateface.seed.clients.common import HELP, LoginRefused, is_pirateface
 from pirateface.seed.clients.qbittorrent import QBittorrent
 from pirateface.seed.clients.transmission import Transmission
 
 __all__ = [
     "HELP",
-    "KEYED",
-    "PIRATEFACE",
     "LoginRefused",
     "QBittorrent",
-    "Transmission",
     "add",
     "is_pirateface",
     "running",

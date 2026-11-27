@@ -8,7 +8,7 @@ from pirateface.config import flag
 TARGETS = {"huggingface_hub.file_download"}
 
 
-def _install(name, module):
+def _install(module):
     try:
         from pirateface.huggingface import hook
 
@@ -34,7 +34,7 @@ class _PatchOnImport:
 
         def exec_and_patch(module):
             exec_module(module)
-            _install(name, module)
+            _install(module)
 
         spec.loader.exec_module = exec_and_patch
         return spec
@@ -44,4 +44,4 @@ if not flag("PF_DISABLE"):
     sys.meta_path.insert(0, _PatchOnImport())
     for name in TARGETS:
         if name in sys.modules:
-            _install(name, sys.modules[name])
+            _install(sys.modules[name])

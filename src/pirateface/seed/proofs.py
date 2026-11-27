@@ -12,13 +12,12 @@ PF_NO_BLOCK_PROOFS=1 turns the proofs off.
 
 import base64
 import contextlib
-import hashlib
 import os
 import tempfile
 
 from pirateface.client import api
 from pirateface.config import flag
-from pirateface.seed.hybrid import BLOCK, ZERO
+from pirateface.seed.hybrid import BLOCK, ZERO, _merkle_levels
 
 PART_BYTES = 1 << 20  # sibling hashes per upload: the most the site takes in one part
 
@@ -78,12 +77,8 @@ class BlockHashes:
         """The hash tree over count block hashes from first, padded with zero hashes to width: leaves first."""
         self._file.seek(32 * first)
         data = self._file.read(32 * count)
-        layer = [data[i : i + 32] for i in range(0, len(data), 32)] + [ZERO] * (width - count)
-        levels = [layer]
-        while len(layer) > 1:
-            layer = [hashlib.sha256(layer[i] + layer[i + 1]).digest() for i in range(0, len(layer), 2)]
-            levels.append(layer)
-        return levels
+        layer = [data[i : i + 32] for i in range(0, len(data), 32)]
+        return _merkle_levels(layer, ZERO, width)
 
     def siblings(self, picks, plen):
         """The sibling hashes, leaf to piece hash, of each (path, block) in picks, concatenated. The tree is

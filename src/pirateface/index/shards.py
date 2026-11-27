@@ -14,7 +14,6 @@ from pathlib import Path
 
 from pirateface import config
 from pirateface._regex import COMMIT_ANY as _HASH
-from pirateface._regex import COMMIT_LOWER as _COMMIT
 from pirateface._regex import REPO_STRICT as _REPO
 from pirateface.client import api
 
@@ -22,6 +21,7 @@ from pirateface.client import api
 # the configured mirror's) host is accepted: a shard cannot point a lookup at somebody else's server.
 WS_HOSTS = {"pirateface.co"}
 _BTMH = re.compile(r"1220[0-9a-fA-F]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{40}")  # lowercase-only 40-char commit ids, from the web seed path
 
 DIR = Path(config.CACHE_DIR) / "index"
 SHARDS = DIR / "shards"

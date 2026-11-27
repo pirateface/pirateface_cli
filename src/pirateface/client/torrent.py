@@ -170,15 +170,10 @@ def _check_listing(repo_id, h, saved):
         raise
 
 
-def _atomic_write(path, data):
-    """Write data to path atomically, so a crash or a full disk leaves no half-written .torrent behind."""
-    write_bytes(path, data)
-
-
 def _cache_file_list(saved, h):
     """Save the file list a peer sent, so a magnet alone needs a live peer only the first time."""
     if not saved.exists():
-        _atomic_write(saved, lt.bencode({"info": lt.bdecode(h.torrent_file().info_section())}))
+        write_bytes(saved, lt.bencode({"info": lt.bdecode(h.torrent_file().info_section())}))
 
 
 def _handle(repo_id, resume=None, magnet=None, where=None):
@@ -263,7 +258,7 @@ def _save_torrent_file(repo_id, saved, infohash):
         # swarm: the magnet still works and the file list can come from peers.
         return
     if str(ti.info_hashes().v1) == infohash:
-        _atomic_write(saved, data)
+        write_bytes(saved, data)
 
 
 def _show_status(repo_id, h, every=0.5, recent=3.0):

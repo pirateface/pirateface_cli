@@ -58,6 +58,12 @@ class Outcome:
     stderr: bool = False  # True prints the message to stderr
 
 
+def _release(key, job):
+    """Give the lease back, best effort: unanswered, the lease lapses on its own. Never masks the
+    outcome the caller is already deciding."""
+    site.release(key, job["leaseId"])
+
+
 def _consent():
     print(f"""
 ==> pf work: you build the torrent for one queued model at a time. Its files are streamed from
@@ -132,7 +138,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         raise
     except (WorkError, user.SeedError) as e:
         state.clear(name, files=not isinstance(e, LeaseLost))
-        site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+        _release(key, job)
         raise
     except (OSError, RuntimeError):
         # A local failure in the job path (an unreadable file, a full disk on the checkpoint, an
@@ -140,7 +146,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         # back so the site can offer the row again, keep the checkpoint for the next run, and let the
         # caller turn it into a clean message instead of a traceback.
         with contextlib.suppress(Exception):
-            site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+            _release(key, job)
         raise
     status, answer = site.complete(key, job["leaseId"], data, manifest, block_proofs)
     if site.transient(status):
@@ -167,13 +173,13 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
         # The site answered 200 but not with a listing: a refused job. Release the lease and clear the
         # checkpoint, as the other refused paths do, so the next poll can take the next job; keeping the
         # checkpoint would re-submit the refused lease forever.
-        site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+        _release(key, job)
         state.clear(name, files=True)
         print(f"    Not listed (unexpected 200 body): {answer!r}")
         return False
     # A refused job: clear the checkpoint and release the lease, so the next poll can take the next job
     # instead of holding this one for the lease's 10-minute lapse.
-    site.release(key, job["leaseId"])  # best effort: unanswered, the lease lapses on its own
+    _release(key, job)
     state.clear(name, files=True)
     print(f"    Not listed ({status}): {(answer or {}).get('error', 'request failed')}")
     return False

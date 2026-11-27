@@ -4,8 +4,8 @@ With a repo (its uploader): rebuild your v1 torrent of it as a hybrid from the c
 paths, and have Pirate Face list it in place of the old one. Then seed it at once from the same files, drop the old
 torrent (files stay) and add the per-file swarms. With --mine (its uploader too): the same for every listed v1
 torrent you submitted that has a complete copy in qBittorrent, in one command, reporting the ones it could not.
-Without a repo (any seeder): switch every Pirate Face torrent in qBittorrent that Pirate Face replaced to its
-replacement, so you keep seeding the swarm that is listed."""
+Without a repo (any seeder): switch every v1-only Pirate Face torrent in qBittorrent that Pirate Face replaced
+to its replacement, so you keep seeding the swarm that is listed."""
 
 import base64
 import http.client
@@ -188,11 +188,15 @@ def upgrade_mine():
 
 
 def replacement(qbt, t, timeout=15):
-    """The site's record of a Pirate Face torrent in qBittorrent if it was replaced, else None."""
-    if not clients.is_pirateface(qbt.trackers(t["hash"], timeout=timeout)):
+    """The site's record of a v1-only Pirate Face torrent in qBittorrent if it was replaced, else None."""
+    if t.get("infohash_v2") or not clients.is_pirateface(qbt.trackers(t["hash"], timeout=timeout)):
         return None
     status = api.torrent_status(t.get("infohash_v1") or t["hash"], timeout=timeout)
-    return status if isinstance(status, dict) and status.get("status") == "superseded" and status.get("supersededBy") else None
+    return (
+        status
+        if isinstance(status, dict) and status.get("status") == "superseded" and status.get("supersededBy")
+        else None
+    )
 
 
 def _matching(torrents, name):
@@ -209,7 +213,7 @@ def _superseded(qbt, torrent, budget):
 
 
 def superseded_in_client(repo=None, name=None):
-    """(entry, status) pairs of the Pirate Face torrents in qBittorrent that Pirate Face replaced,
+    """(entry, status) pairs of the v1-only Pirate Face torrents in qBittorrent that Pirate Face replaced,
     optionally only those called name (a repo's torrent) and only those for repo.
     Best-effort: client or site failures, or a spent budget, yield the pairs found so far — the
     nudge is a note, never a wait."""
@@ -259,7 +263,7 @@ def switch(qbt, t, status, trackers):
 
 
 def switch_all():
-    """Every Pirate Face torrent in qBittorrent that Pirate Face replaced: add the replacement on the same
+    """Every v1-only Pirate Face torrent in qBittorrent that Pirate Face replaced: add the replacement on the same
     files, then drop the old one. qBittorrent checks the files against the new torrent; nothing is downloaded."""
     print("==> Switching replaced Pirate Face torrents in qBittorrent")
     qbt = _qbittorrent()

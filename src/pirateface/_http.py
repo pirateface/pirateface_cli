@@ -8,7 +8,7 @@ hosts. Callers pick a policy explicitly; the opener is shared."""
 import json
 import urllib.parse
 import urllib.request
-from importlib.metadata import version
+from importlib.metadata import version as _pkg_version
 
 # policy names: how a redirect is handled.
 NO_REDIRECTS = "none"
@@ -56,9 +56,14 @@ def request_json(url, timeout, *, headers=None, policy, parse=json.loads, method
         return r.status, parse(r.read())
 
 
+def version():
+    """The installed version of pirateface. Shared by the User-Agent and the site's answer checks."""
+    return _pkg_version("pirateface")
+
+
 def user_agent():
     """The User-Agent every outbound request carries: pirateface/<version>."""
-    return f"pirateface/{version('pirateface')}"
+    return f"pirateface/{version()}"
 
 
 def request(url, headers=None, data=None, method=None):

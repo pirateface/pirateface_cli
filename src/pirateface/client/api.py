@@ -10,11 +10,11 @@ import time
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
-from importlib.metadata import version
 
 from pirateface._http import NO_REDIRECTS
 from pirateface._http import open_request as _http_open_request
 from pirateface._http import request_json as _http_request_json
+from pirateface._http import version as _version
 from pirateface.config import API
 
 
@@ -306,7 +306,7 @@ def licenses():
         return json.load(r)
 
 
-VERSION = version("pirateface")
+VERSION = _version()
 
 
 def min_client_version():

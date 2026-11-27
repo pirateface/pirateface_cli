@@ -13,7 +13,7 @@ from pirateface.work.resumable_hash import ResumableSHA256
 def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *, saved=None):
     """Stream a job with piece checkpoints or file-boundary checkpoints."""
     repo, revision = job["repoId"], job["revision"]
-    files = sorted(job["files"], key=lambda f: hybrid.torrent_order(f["path"].split("/")))
+    files = state.sorted_files(job["files"])
     total = sum(f["size"] for f in files)
     plen, have_proofs = hybrid.piece_length(total), blocks is not None
     done, partial = saved if saved is not None else state.load_progress(job, plen, have_proofs, name)

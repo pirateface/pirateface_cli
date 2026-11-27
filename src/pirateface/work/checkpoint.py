@@ -41,11 +41,13 @@ def clear_files(name=None):
     blocks_path(name).unlink(missing_ok=True)
 
 
+def sorted_files(files):
+    """A job's files in torrent order, the order the torrent lists them."""
+    return sorted(files, key=lambda f: torrent_order(f["path"].split("/")))
+
+
 def _job_key(job, plen, proofs):
-    files = sorted(
-        ([f["path"], f["size"], f.get("sha256")] for f in job["files"]),
-        key=lambda f: torrent_order(f[0].split("/")),
-    )
+    files = [[f["path"], f["size"], f.get("sha256")] for f in sorted_files(job["files"])]
     return [job["repoId"], job["revision"], plen, proofs, files]
 
 

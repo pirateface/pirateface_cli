@@ -6,7 +6,7 @@ import contextlib
 import json
 import os
 
-from pirateface.work.checkpoint import _path, _write, blocks_path, clear_files, load_progress, save_files
+from pirateface.work.checkpoint import _path, _write, blocks_path, clear_files, load_progress, save_files, sorted_files
 
 __all__ = [
     "CheckpointLocked",
@@ -19,6 +19,7 @@ __all__ = [
     "lock",
     "save",
     "save_files",
+    "sorted_files",
 ]
 
 

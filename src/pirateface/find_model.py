@@ -6,21 +6,13 @@ list (or is too small to identify honestly by SHA-256) reports no match -- that 
 and never a guess.
 """
 
-import hashlib
 import sys
 from pathlib import Path
 
+from pirateface._hash import sha256_file
 from pirateface.client.api import Unreachable, Unreadable, rows_by_sha256
 
 MIN_FILE_SIZE = 1 << 20  # 1 MiB: tiny configs and tokenizers are too small to identify honestly by sha256
-
-
-def hash_file(path):
-    h = hashlib.sha256()
-    with Path(path).open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def find(path, out=sys.stdout):
@@ -41,7 +33,7 @@ def find(path, out=sys.stdout):
         )
         return 1
     try:
-        digest = hash_file(path)
+        digest = sha256_file(path)
     except OSError as e:
         print(f"error: {path} could not be read ({e})", file=sys.stderr)
         return 1

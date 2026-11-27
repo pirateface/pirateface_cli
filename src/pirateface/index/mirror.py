@@ -43,12 +43,14 @@ STATE = DIR / "state.json"
 _sync_lock = threading.Lock()
 
 __all__ = [
+    "SHARDS",
     "broken",
     "build",
     "count",
     "infohash_of",
     "listing",
     "magnets",
+    "published",
     "resolve",
     "state",
     "sync",

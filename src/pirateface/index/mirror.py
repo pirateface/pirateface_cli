@@ -6,7 +6,6 @@ pf mirrors those shards into PF_CACHE/index/shards/ and answers lookups from tha
 cannot be reached, so a model can still be downloaded instead of falling back to Hugging Face.
 """
 
-import hashlib
 import json
 import os
 import shutil
@@ -14,6 +13,7 @@ import threading
 import time
 from pathlib import Path
 
+from pirateface._hash import sha256_file
 from pirateface.client import api, torrent
 from pirateface.index import FILE, INDEX_REPO
 from pirateface.index.shards import (
@@ -102,7 +102,7 @@ def _write_state(**fields):
 def _digest(path):
     """sha256 of a cached file, or None if it cannot be read."""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return sha256_file(path)
     except OSError:
         return None
 

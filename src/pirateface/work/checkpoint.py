@@ -4,8 +4,8 @@ checkpoint load/save machinery that rebuilds a job from what a previous run alre
 import contextlib
 import hashlib
 import json
-import os
 
+from pirateface._atomic import write_bytes
 from pirateface.seed import user
 from pirateface.seed.hybrid import BLOCK, torrent_order
 
@@ -18,16 +18,7 @@ def _path(name, kind="lease", suffix=".json"):
 
 def _write(path, data):
     """Write JSON to path atomically (temp file + rename), readable by this user only."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(f".{os.getpid()}.tmp")
-    try:
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-            f.write("\n")
-        temp.replace(path)
-    finally:
-        temp.unlink(missing_ok=True)
+    write_bytes(path, (json.dumps(data) + "\n").encode("utf-8"), mode=0o600)
 
 
 def blocks_path(name=None):

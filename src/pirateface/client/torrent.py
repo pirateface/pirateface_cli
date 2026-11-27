@@ -1,7 +1,6 @@
 import atexit
 import contextlib
 import enum
-import os
 import shutil
 import threading
 import time
@@ -10,6 +9,7 @@ from pathlib import Path
 import libtorrent as lt
 
 from pirateface import config, ui
+from pirateface._atomic import write_bytes
 from pirateface._http import user_agent as _user_agent
 from pirateface.client import alerts, api, rescue
 from pirateface.client.files import (
@@ -172,14 +172,7 @@ def _check_listing(repo_id, h, saved):
 
 def _atomic_write(path, data):
     """Write data to path atomically, so a crash or a full disk leaves no half-written .torrent behind."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.part")
-    try:
-        tmp.write_bytes(data)
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_bytes(path, data)
 
 
 def _cache_file_list(saved, h):

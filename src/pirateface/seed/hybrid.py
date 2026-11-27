@@ -47,6 +47,16 @@ def piece_length(total_size):
     return 1 << exp
 
 
+def blocks_per_piece(plen):
+    """How many 16 KiB blocks make up one piece."""
+    return plen // BLOCK
+
+
+def ceil_blocks(size):
+    """How many 16 KiB blocks hold size bytes (a partial block counts)."""
+    return -(-size // BLOCK)
+
+
 def _merkle_levels(layer, pad, width):
     """The block-hash tree over layer, padded to width (a power of two): leaves first."""
     layer = layer + [pad] * (width - len(layer))
@@ -192,7 +202,7 @@ def build_from(
     """
     if partial and sums is not None:
         raise ValueError("partial streams must provide their own resumable whole-file hash")
-    per_piece = plen // BLOCK
+    per_piece = blocks_per_piece(plen)
     piece_pad = _merkle([ZERO] * per_piece, ZERO)
     v1 = _V1Pieces(plen)
     files, tree, layers, pad_index, padded = [], {}, {}, 0, len(sources) > 1

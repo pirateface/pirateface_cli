@@ -17,7 +17,7 @@ import tempfile
 
 from pirateface.client import api
 from pirateface.config import flag
-from pirateface.seed.hybrid import BLOCK, ZERO, _merkle_levels
+from pirateface.seed.hybrid import ZERO, _merkle_levels, blocks_per_piece
 
 PART_BYTES = 1 << 20  # sibling hashes per upload: the most the site takes in one part
 
@@ -64,7 +64,7 @@ class BlockHashes:
     def verify_partial(self, path, roots, plen):
         """Check saved partial-file block hashes against their stored piece roots."""
         first, count = self._files[path]
-        per_piece = plen // BLOCK
+        per_piece = blocks_per_piece(plen)
         if count % per_piece or len(roots) != count // per_piece * 32:
             raise ValueError(f"invalid saved block hashes for {path}")
         self.flush()
@@ -85,7 +85,7 @@ class BlockHashes:
         the block's piece for a file longer than one piece, else the whole file (its pieces root). The site
         sends picks in torrent order, so blocks of one piece follow each other and share one tree."""
         self.flush()
-        per_piece, out, tree, levels = plen // BLOCK, bytearray(), None, []
+        per_piece, out, tree, levels = blocks_per_piece(plen), bytearray(), None, []
         for path, block in picks:
             first, count = self._files[path]
             if not 0 <= block < count:

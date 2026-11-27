@@ -121,6 +121,11 @@ def _main():
         action="store_true",
         help="seed already-listed torrents from Hugging Face/Ollama cache files (qBittorrent required)",
     )
+    model.add_argument(
+        "--comfyui",
+        metavar="DIR",
+        help="also hash weight files under a ComfyUI models folder and match them by content hash",
+    )
     per_file = s.add_argument_group("per-file layer", "a swarm per shared file, on top of the model torrent")
     per_file.add_argument(
         "--update-per-file",

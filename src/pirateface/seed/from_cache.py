@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from tqdm.auto import tqdm
 
-from pirateface._regex import REPO_LINE
+from pirateface._regex import REPO_LINE, WEIGHT
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
 from pirateface.seed import clients, package, user
@@ -81,13 +81,9 @@ def _ollama_cache():
     root = _ollama_root()
     blobs = {}
     queries = set()
+    referenced = set()
     blob_dir = root / "blobs"
     manifests = root / "manifests"
-    if blob_dir.is_dir():
-        for blob in blob_dir.iterdir():
-            digest = blob.name.removeprefix("sha256-")
-            if SHA256.fullmatch(digest) and blob.is_file() and not blob.is_symlink():
-                blobs.setdefault(digest.lower(), blob.resolve())
     if manifests.is_dir():
         for manifest in manifests.rglob("*"):
             if not manifest.is_file() or manifest.is_symlink():
@@ -98,6 +94,14 @@ def _ollama_cache():
                 continue
             if not isinstance(value, dict):
                 continue
+            layers = value.get("layers")
+            if isinstance(layers, list):
+                for layer in layers:
+                    digest = layer.get("digest") if isinstance(layer, dict) else None
+                    if isinstance(digest, str):
+                        digest = digest.removeprefix("sha256:").lower()
+                        if SHA256.fullmatch(digest):
+                            referenced.add(digest)
             parts = list(manifest.relative_to(manifests).parts)
             if parts and ("." in parts[0] or ":" in parts[0]):
                 parts.pop(0)
@@ -108,7 +112,38 @@ def _ollama_cache():
                 queries.add(f"{model} {tag}")
                 if tag.casefold() == "latest":
                     queries.add(model)
+    if blob_dir.is_dir():
+        for blob in blob_dir.iterdir():
+            digest = blob.name.removeprefix("sha256-").lower()
+            if not SHA256.fullmatch(digest) or not blob.is_file() or blob.is_symlink():
+                continue
+            if referenced:
+                if digest not in referenced:
+                    continue
+                digest = _sha256(blob.resolve())  # hash the manifest-referenced blob's contents
+            blobs.setdefault(digest, blob.resolve())
     return root, blobs, queries
+
+
+def _comfyui_blobs(root):
+    """Weight files under a ComfyUI models folder, keyed by content hash (symlinks skipped)."""
+    blobs = {}
+    if not root:
+        return blobs
+    root = Path(root).expanduser()
+    if not root.is_dir():
+        print(f"ComfyUI models folder not found: {root}", file=sys.stderr)
+        return blobs
+    for path in sorted(root.rglob("*")):
+        try:
+            if not path.is_file() or path.is_symlink():
+                continue
+            if not WEIGHT.search(path.name):
+                continue
+            blobs.setdefault(_sha256(path), path.resolve())
+        except OSError:
+            continue
+    return blobs
 
 
 def _repos_from_search(text):
@@ -251,11 +286,17 @@ def _seed(candidate, qbt, trackers, per_file):
         seed_model(data, save_dir, candidate.v1, verified=True)
 
 
-def seed_from_cache(per_file=True):
+def seed_from_cache(per_file=True, comfyui=None):
     """Match cached hashes to existing Pirate Face torrents and seed verified matches in qBittorrent."""
     snapshots, hf_blobs, hf_root = _huggingface_cache()
     ollama_root, ollama_blobs, ollama_queries = _ollama_cache()
-    blobs = hf_blobs | ollama_blobs
+    comfyui_blobs = _comfyui_blobs(comfyui)
+    blobs = hf_blobs | ollama_blobs | comfyui_blobs
+    if comfyui_blobs:
+        print(f"==> Hashed {len(comfyui_blobs)} ComfyUI weight file(s) under {comfyui}")
+        print("    No reverse-hash endpoint exists on the site: a ComfyUI file matches an existing listing")
+        print("    only via the repo candidates below. Finding listings from hashes alone needs a")
+        print("    server-side change (see the PR).")
     repos = set(snapshots)
     repos.update(_search_ollama(ollama_queries))
     if not blobs and not any(snapshots.values()):

@@ -11,7 +11,7 @@ import libtorrent as lt
 
 from pirateface import config, ui
 from pirateface._http import user_agent as _user_agent
-from pirateface.client import alerts, api
+from pirateface.client import alerts, api, rescue
 from pirateface.client.files import (
     NotInTorrent,
     Unavailable,
@@ -111,7 +111,7 @@ def _lookup_magnet(repo_id):
         raise Unavailable(f"accept the license terms at {config.API}/{repo_id}")
     magnet = answer.entry.get("magnet") if answer.found else None
     if not magnet:
-        ui.not_on_pirateface(repo_id, answer.not_listed and api.request_rescue(repo_id))
+        ui.not_on_pirateface(repo_id, answer.not_listed and rescue.request_rescue(repo_id))
         _remember(repo_id, RepoState.NO_SWARM)
     return magnet
 

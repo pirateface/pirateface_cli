@@ -15,10 +15,7 @@ from importlib.metadata import version
 from pirateface._http import NO_REDIRECTS
 from pirateface._http import open_request as _http_open_request
 from pirateface._http import request_json as _http_request_json
-from pirateface.client import rescue as _rescue
 from pirateface.config import API
-
-request_rescue = _rescue.request_rescue
 
 
 class Status(enum.Enum):

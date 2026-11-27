@@ -4,13 +4,12 @@
 from vulture.whitelist_utils import Whitelist
 
 from pirateface import cli
-from pirateface.client import api, rescue, torrent
+from pirateface.client import rescue, torrent
 
 _ = Whitelist()
 
 cli.main  # entry point: [project.scripts] pf and pirateface
 rescue._wait_for_rescues  # @atexit.register: runs at interpreter exit
-api.request_rescue  # re-exported for client/torrent.py
 torrent._cleanup  # @atexit.register: runs at interpreter exit
 _.flags  # libtorrent add_torrent_params.flags, read by libtorrent (client/torrent.py)
 _.addheaders  # urllib OpenerDirector.addheaders, read by urllib (seed/clients.py)

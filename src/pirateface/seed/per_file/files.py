@@ -3,10 +3,12 @@
 Pirate Face publishes a pure v2 torrent per file (by BEP 52 pieces root, /api/files/<root>). Every upload
 with the same bytes shares it. The model torrent already holds each file's pieces root: nothing is hashed."""
 
+import sys
 from pathlib import Path
 
 import libtorrent as lt
 
+from pirateface._files import size_matches
 from pirateface.client.torrent import real_files
 from pirateface.config import MIN_FILE_BYTES
 
@@ -20,8 +22,11 @@ def local_files(data, save_dir):
     found = []
     for i in real_files(fs):  # BEP 47 padding is zeros, with no pieces root of its own
         path, size = Path(save_dir, fs.file_path(i)), fs.file_size(i)
-        if size >= MIN_FILE_BYTES and path.is_file() and path.stat().st_size == size:
-            found.append((path, str(fs.root(i))))
+        if size >= MIN_FILE_BYTES:
+            if size_matches(path, size):
+                found.append((path, str(fs.root(i))))
+            else:
+                print(f"Skipping {path}: unreadable or wrong size", file=sys.stderr)
     return found
 
 

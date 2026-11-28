@@ -136,7 +136,7 @@ def seed_cache(per_file=False):
             continue
         print()
         verb = "Seed" if status is PlanStatus.SEED else "Share"
-        if not user.YES and not user.ask(f"==> {verb} {repo} ({size})? [y/N] ").lower().startswith("y"):
+        if not user.confirm(f"==> {verb} {repo} ({size})? [y/N] "):
             continue
         try:
             if status is PlanStatus.SEED:

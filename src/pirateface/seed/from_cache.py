@@ -300,9 +300,7 @@ def seed_from_cache(per_file=True):
         raise clients.qbittorrent_unreachable() from error
     key = trackers = None
     for candidate in candidates:
-        if not user.YES and not user.ask(
-            f"==> Seed {candidate.repo} ({candidate.seeders} seeds)? [y/N] "
-        ).lower().startswith("y"):
+        if not user.confirm(f"==> Seed {candidate.repo} ({candidate.seeders} seeds)? [y/N] "):
             continue
         if trackers in (None, api.TRACKERS):  # share a real answer; after the built-in fallback list, ask again
             key = key or user.load_key()

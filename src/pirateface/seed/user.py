@@ -40,6 +40,14 @@ def ask(prompt, hidden=False):
     return (getpass.getpass if hidden else input)(prompt).strip()
 
 
+def confirm(prompt):
+    """The one y/N prompt: True when the user answers y. Under -y the prompt is not asked, so a seeded
+    run with -y never blocks on one; it is also the single place the [y/N] idiom lives."""
+    if YES:
+        return True
+    return ask(prompt).lower().startswith("y")
+
+
 def load_key():
     """Account key from /settings, saved for next time."""
     key = read_key()

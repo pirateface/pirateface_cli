@@ -7,7 +7,7 @@ from pathlib import Path
 import libtorrent as lt
 
 from pirateface.client import api
-from pirateface.config import API, MAX_UPLOAD_BYTES
+from pirateface.config import API
 from pirateface.seed import user
 
 
@@ -62,7 +62,7 @@ def run(args):
     failures = 0
     for path in files:
         try:
-            if path.stat().st_size > MAX_UPLOAD_BYTES:
+            if user.torrent_oversize(path.stat().st_size):
                 print(f"too large (>3 MB): {path}")
                 failures += 1
                 continue

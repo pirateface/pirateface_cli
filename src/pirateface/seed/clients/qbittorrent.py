@@ -14,6 +14,26 @@ from pirateface._http import request as _http_request
 from pirateface.seed.clients.common import KEYED, LoginRefused, tracker_update_loop
 
 
+def _field(boundary, name, *, filename=None, content_type=None):
+    """A multipart field's header, ending at the blank line. A file field carries its filename and
+    content type."""
+    header = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"'
+    if filename:
+        header += f'; filename="{filename}"'
+    if content_type:
+        header += f"\r\nContent-Type: {content_type}"
+    return header + "\r\n\r\n"
+
+
+def _multipart_body(boundary, parts):
+    """A full multipart/form-data body for the qBittorrent torrents/add call. parts: (header, value)
+    pairs, value str or bytes; the final boundary is added here."""
+    body = b""
+    for header, value in parts:
+        body += header.encode() + (value if isinstance(value, bytes) else value.encode())
+    return body + f"\r\n--{boundary}--\r\n".encode()
+
+
 class QBittorrent:
     name = "qBittorrent"
 
@@ -92,29 +112,27 @@ class QBittorrent:
         """Add magnet links with qBittorrent's default save path. qBittorrent fetches each one's metadata from
         the swarm, then downloads and seeds it; trackers named in each magnet's `tr` are announced to."""
         b = uuid.uuid4().hex
-        body = (
-            f'--{b}\r\nContent-Disposition: form-data; name="urls"\r\n\r\n{"\r\n".join(urls)}\r\n--{b}--\r\n'
-        ).encode()
+        body = _multipart_body(b, [(_field(b, "urls"), "\r\n".join(urls))])
         answer = self.call("torrents/add", body=body, content_type=f"multipart/form-data; boundary={b}").strip()
         if answer == "Fails.":
             raise RuntimeError("qBittorrent did not take the magnets")
 
     def add(self, data, save_dir, skip_checking=False, paused=None, stopped=None):
         b = uuid.uuid4().hex
-        fields = [f'--{b}\r\nContent-Disposition: form-data; name="savepath"\r\n\r\n{save_dir}\r\n']
+        fields = [(_field(b, "savepath"), f"{save_dir}\r\n")]
         if paused is not None:
-            value = "true" if paused else "false"
-            fields.append(f'--{b}\r\nContent-Disposition: form-data; name="paused"\r\n\r\n{value}\r\n')
+            fields.append((_field(b, "paused"), f"{'true' if paused else 'false'}\r\n"))
         if stopped is not None:
-            value = "true" if stopped else "false"
-            fields.append(f'--{b}\r\nContent-Disposition: form-data; name="stopped"\r\n\r\n{value}\r\n')
+            fields.append((_field(b, "stopped"), f"{'true' if stopped else 'false'}\r\n"))
         if skip_checking:
-            fields.append(f'--{b}\r\nContent-Disposition: form-data; name="skip_checking"\r\n\r\ntrue\r\n')
+            fields.append((_field(b, "skip_checking"), "true\r\n"))
         fields.append(
-            f'--{b}\r\nContent-Disposition: form-data; name="torrents"; filename="model.torrent"\r\n'
-            "Content-Type: application/x-bittorrent\r\n\r\n"
+            (
+                _field(b, "torrents", filename="model.torrent", content_type="application/x-bittorrent"),
+                data,
+            )
         )
-        body = "".join(fields).encode() + data + f"\r\n--{b}--\r\n".encode()
+        body = _multipart_body(b, fields)
         answer = self.call("torrents/add", body=body, content_type=f"multipart/form-data; boundary={b}").strip()
         if answer == "Fails.":
             raise RuntimeError("qBittorrent did not take the torrent")

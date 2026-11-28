@@ -8,6 +8,6 @@ def repo_folder(repo):
 
 
 def folder_repo(folder):
-    """The author/model repo a folder name names. Accepts the HF cache's models--prefix as well as a bare
-    author--model seed folder name (only the first -- is a separator)."""
+    """The author/model repo an HF cache folder name (models--<author>--<model>) names. The models-- prefix is
+    stripped first, then only the first -- is a separator (so an author named "models" parses correctly)."""
     return folder.removeprefix("models--").replace("--", "/", 1)

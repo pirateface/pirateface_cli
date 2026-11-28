@@ -7,9 +7,10 @@ import libtorrent as lt
 
 from pirateface import ui
 from pirateface.client import api
+from pirateface.config import MIN_FILE_BYTES
 from pirateface.seed import clients
 from pirateface.seed.per_file.adder import Adder
-from pirateface.seed.per_file.files import MIN_SIZE, biggest_file, local_files
+from pirateface.seed.per_file.files import biggest_file, local_files
 from pirateface.seed.user import SeedError, seeding_tracker
 
 NEEDS_QBITTORRENT = "per-file torrents are BitTorrent v2 only and need qBittorrent (Web UI on)"
@@ -98,7 +99,7 @@ def classify(t, qbt):
         if not clients.is_pirateface(qbt.trackers(t["hash"])):
             return None  # not a model pf seeded
         data = _load(qbt.export(t["hash"]), t.get("infohash_v1") or t["hash"])
-        if biggest_file(data) < MIN_SIZE:
+        if biggest_file(data) < MIN_FILE_BYTES:
             return None  # nothing of 1 MiB or more is worth a per-file swarm
         found = local_files(data, t["save_path"])
     except (OSError, RuntimeError, ValueError) as exc:  # OSError: a qBittorrent call 404 or 409 (HTTPError)

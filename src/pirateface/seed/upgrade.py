@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from pirateface import ui
+from pirateface._files import size_matches
 from pirateface.client import api, torrent
 from pirateface.config import API
 from pirateface.seed import clients, hybrid, package, user
@@ -81,7 +82,7 @@ def complete_copy(qbt, repo, old, v1, name):
     except torrent.Unsafe as e:
         raise SeedError(f"{repo}'s listed .torrent lists paths pf won't write: {e}") from e
     for path, size, _ in files:
-        if not folder.joinpath(path).is_file() or folder.joinpath(path).stat().st_size != size:
+        if not size_matches(folder / path, size):
             raise SeedError(f"{folder / path} is missing or has the wrong size")
     return entry, folder, files
 

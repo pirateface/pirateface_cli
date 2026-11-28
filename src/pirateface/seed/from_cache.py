@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from pirateface import ui
 from pirateface._atomic import write_bytes
+from pirateface._files import size_matches
 from pirateface._folders import folder_repo
 from pirateface._hash import sha256_file
 from pirateface._regex import REPO_LINE
@@ -35,10 +36,6 @@ class Candidate:
     files: dict[str, Path]
     seeders: int
     leechers: int
-
-
-def _matches_size(source, size):
-    return source is not None and source.is_file() and source.stat().st_size == size
 
 
 def _cached_file(path):
@@ -143,11 +140,11 @@ def _source_for(path, digest, size, blobs, snapshots):
         return None
     digest = digest.lower()
     source = blobs.get(digest)
-    if _matches_size(source, size):
+    if size_matches(source, size):
         return source
     for snapshot in snapshots:
         source = snapshot / PurePosixPath(path)
-        if _matches_size(source, size):
+        if size_matches(source, size):
             cached = _cached_file(source)
             if cached:
                 if cached[0] == digest:

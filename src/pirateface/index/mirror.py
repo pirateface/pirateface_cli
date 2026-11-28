@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from pirateface._atomic import copy_file, write_bytes
+from pirateface._files import size_matches
 from pirateface._hash import sha256_file
 from pirateface.client import api, torrent
 from pirateface.index import FILE, INDEX_REPO
@@ -106,10 +107,7 @@ def _unchanged(path, size, recorded):
     sync. A file that cannot be read is never the copy this build names: otherwise `pf index` tells the
     user to run a sync that would keep the very file it is complaining about.
     """
-    try:
-        if not path.is_file() or path.stat().st_size != size:
-            return False
-    except OSError:
+    if not size_matches(path, size):
         return False
     digest = _digest(path)
     if digest is None:

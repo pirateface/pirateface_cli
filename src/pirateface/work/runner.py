@@ -11,7 +11,7 @@ from pirateface import ui
 from pirateface.client import api
 from pirateface.config import API, MAX_UPLOAD_BYTES, TORRENT_OVERSIZE_MESSAGE, flag
 from pirateface.seed import hybrid, proofs, user
-from pirateface.work import build, site, state
+from pirateface.work import build, checkpoint, site, state
 from pirateface.work.errors import LeaseLost, Oversize, WorkError, WorkUnreachable
 
 WORK_BACKOFF_MIN = 30  # the first pause after a failed lease poll or a failed job; doubles to the cap
@@ -108,10 +108,10 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
     try:
         state.save(job, name)
         plen = hybrid.piece_length(total)
-        saved = state.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
+        saved = checkpoint.load_progress(job, plen, not flag("PF_NO_BLOCK_PROOFS"), name)
 
         def _attempt(saved_checkpoint):
-            with proofs.sidecar(state.blocks_path(name)) as blocks:
+            with proofs.sidecar(checkpoint.blocks_path(name)) as blocks:
                 data, manifest, infohash = build.build(
                     job, key, trackers, name, blocks, max_download_rate, saved=saved_checkpoint
                 )
@@ -132,7 +132,7 @@ def _process_job(job, key, trackers, name, max_bytes=None, max_download_rate=Non
             print(f"    Discarded unusable checkpoint ({e}); rebuilding from scratch.")
             # The sidecar is closed by _attempt's `with` block before this unlinks it, so clearing
             # files cannot leave an open handle pointing at an unlinked path.
-            state.clear_files(name)
+            checkpoint.clear_files(name)
             data, manifest, infohash, block_proofs = _attempt(([], None))
     except WorkUnreachable:
         raise
@@ -193,12 +193,12 @@ def _work_once(key, trackers, name, max_bytes=None, max_download_rate=None):
     if status == 409:
         lease_id = site.held_lease_id(job)
         try:
-            checkpoint = state.load(name) if lease_id else None
+            saved = state.load(name) if lease_id else None
         except OSError as error:
             raise user.SeedError(str(error)) from error
-        if checkpoint and checkpoint.get("leaseId") == lease_id:
-            print(f"Resuming saved lease for {checkpoint['job'].get('repoId', 'model')}.")
-            resumed = _resume_once(key, trackers, name, checkpoint, max_bytes, max_download_rate)
+        if saved and saved.get("leaseId") == lease_id:
+            print(f"Resuming saved lease for {saved['job'].get('repoId', 'model')}.")
+            resumed = _resume_once(key, trackers, name, saved, max_bytes, max_download_rate)
             if resumed is None:
                 # The saved lease expired between the 409 and renew. Let the main loop pause and ask for the next
                 # job; retrying at once would spin.
@@ -243,7 +243,7 @@ def run(args):
         sys.exit(f"error: {e}")
     if args.clear_progress:
         try:
-            state.clear_files(args.name)
+            checkpoint.clear_files(args.name)
         except OSError as e:
             sys.exit(f"error: could not remove progress checkpoint: {e}")
         print("Discarded saved progress hashes for this worker; the saved lease was not changed.")

@@ -148,13 +148,17 @@ def set_status(bar, text):
     bar.refresh()
 
 
+def _peers_label(peers):
+    return f"{peers} peer{'s' * (peers > 1)}"
+
+
 def sources_label(webseed, peers):
     if webseed and peers:
-        return f"web seed + {peers} peer{'s' * (peers > 1)}"
+        return f"web seed + {_peers_label(peers)}"
     if webseed:
         return "web seed"
     if peers:
-        return f"{peers} peer{'s' * (peers > 1)}"
+        return _peers_label(peers)
     return "finding sources…"
 
 

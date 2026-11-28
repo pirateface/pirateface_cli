@@ -15,7 +15,7 @@ from pirateface._folders import repo_folder
 from pirateface._regex import COMMIT_ANY as COMMIT
 from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
-from pirateface.config import API, MAX_UPLOAD_BYTES, SEEDS, TORRENT_OVERSIZE_MESSAGE
+from pirateface.config import API, SEEDS
 from pirateface.seed import clients, hub, hybrid, package, proofs, user
 from pirateface.seed.per_file.command import seed_model
 from pirateface.seed.user import SeedError
@@ -170,8 +170,7 @@ def evidence_for(repo, revision, lic, match, direct, command, answers):
 
 def request_body(repo, revision, lic, evidence, sums, data, v1, v2, readme, web_seed):
     """The POST /api/community-torrents body."""
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise SeedError(TORRENT_OVERSIZE_MESSAGE)
+    user.torrent_size_or_fail(data)
     body = {
         "repoId": repo,
         "revision": revision,

@@ -4,7 +4,7 @@ import time
 
 from pirateface import ui
 from pirateface.seed import hybrid
-from pirateface.work import source, state
+from pirateface.work import checkpoint, source
 from pirateface.work.errors import WorkError
 from pirateface.work.renewal import Lease
 from pirateface.work.resumable_hash import ResumableSHA256
@@ -13,10 +13,10 @@ from pirateface.work.resumable_hash import ResumableSHA256
 def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *, saved=None):
     """Stream a job with piece checkpoints or file-boundary checkpoints."""
     repo, revision = job["repoId"], job["revision"]
-    files = state.sorted_files(job["files"])
+    files = checkpoint.sorted_files(job["files"])
     total = sum(f["size"] for f in files)
     plen, have_proofs = hybrid.piece_length(total), blocks is not None
-    done, partial = saved if saved is not None else state.load_progress(job, plen, have_proofs, name)
+    done, partial = saved if saved is not None else checkpoint.load_progress(job, plen, have_proofs, name)
     try:
         ResumableSHA256()
         piece_checkpoints = True
@@ -26,9 +26,14 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
     if partial and not piece_checkpoints:
         print("    Discarding unfinished piece progress; the interrupted file will be read again.")
         partial = None
-        state.save_files(job, plen, have_proofs, done, name)
+        checkpoint.save_files(job, plen, have_proofs, done, name)
     if blocks is not None:
-        if not done and partial is None and state.blocks_path(name).exists() and state.blocks_path(name).stat().st_size:
+        if (
+            not done
+            and partial is None
+            and checkpoint.blocks_path(name).exists()
+            and checkpoint.blocks_path(name).stat().st_size
+        ):
             print("    Discarding incomplete block hashes; no finished file was checkpointed.")
         kept = [(f["path"], hybrid.ceil_blocks(f["size"])) for f in done]
         if partial:
@@ -61,7 +66,7 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
         partial = None
         if blocks is not None:
             blocks.flush()
-        state.save_files(job, plen, have_proofs, done, name)
+        checkpoint.save_files(job, plen, have_proofs, done, name)
 
     sizes = {f["path"]: f["size"] for f in files}
 
@@ -83,7 +88,7 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
         now = time.monotonic()
         if now - last_piece_save >= 5.0:
             last_piece_save = now
-            state.save_files(job, plen, have_proofs, done, name, partial=partial)
+            checkpoint.save_files(job, plen, have_proofs, done, name, partial=partial)
 
     def opener(path):
         if not piece_checkpoints:

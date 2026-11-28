@@ -126,7 +126,7 @@ def check_hugging_face(repo, revision, license, sums, licenses, answers):
 
 def choose_license(repo, hf_license, sums, licenses, answers):
     """The Pirate Face license id to submit under; stops if it isn't listed or its required file is missing."""
-    ids = [lic["id"] for lic in licenses["licenses"]]
+    ids = hub.license_ids(licenses)
     approved = hub.approved_license(repo, licenses)
     if approved and hf_license in (approved, "other", "-"):
         # Approved one by one: with no license on Hugging Face, or "other" for a listed license, it takes the approved one.

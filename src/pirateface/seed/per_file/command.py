@@ -82,6 +82,7 @@ def repo_of(t):
     pf seeds every model into a <SEEDS>/<author>--<model>/files folder, so the parent folder names the repo."""
     folder = Path(t.get("save_path") or "").parent.name
     if folder and "--" in folder:
+        # Bare seed folder (<author>--<model>), no models-- prefix: split on the first -- only.
         return folder.replace("--", "/", 1)
     return t.get("name") or t["hash"][:8]
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pirateface import ui
 from pirateface._atomic import write_bytes
+from pirateface._folders import repo_folder
 from pirateface._regex import COMMIT_ANY as COMMIT
 from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
@@ -258,7 +259,7 @@ def submit_new(
     # The shared-seeds default keeps each author in their own author--model folder (seed/package.py:seeds_folder
     # applies the same name; seed_listed reuses an old <model> folder that already holds the torrent). An
     # explicit out is used as given; pf submit's own ./pirateface-NAME default is one.
-    out = out or Path(SEEDS, repo.replace("/", "--"))
+    out = out or Path(SEEDS, repo_folder(repo))
     save_dir = out / "files"
     answers = Answers(dry_run)
     # The torrent carries this account's seeding tracker. Trackers are outside the info dict,

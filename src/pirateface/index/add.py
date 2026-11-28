@@ -9,7 +9,6 @@ unaffected.
 
 import urllib.parse
 
-from pirateface.config import API
 from pirateface.index import mirror
 from pirateface.seed import clients, user
 from pirateface.seed.user import SeedError
@@ -20,9 +19,7 @@ BATCH = 100  # magnets per add call, so 32k of them stay a handful of HTTP reque
 def run(yes):
     user.YES = yes
     # Check what the user needs before doing any work: the keyed tracker, then a qBittorrent that answers.
-    mine = user.seeding_tracker()
-    if not mine:
-        raise SeedError(f"could not get your seeding tracker from {API}/api/trackers (key rejected or site down)")
+    mine = user.seeding_tracker_or_fail()
     try:
         qbt = clients.QBittorrent()
     except clients.LoginRefused as e:

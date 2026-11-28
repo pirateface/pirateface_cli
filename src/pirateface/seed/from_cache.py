@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from pirateface import ui
 from pirateface._atomic import write_bytes
+from pirateface._folders import folder_repo
 from pirateface._hash import sha256_file
 from pirateface._regex import REPO_LINE
 from pirateface.client import api, torrent
@@ -54,7 +55,7 @@ def _huggingface_cache():
     if not root.is_dir():
         return snapshots, blobs, root
     for repo_dir in sorted(root.glob("models--*")):
-        repo = repo_dir.name.removeprefix("models--").replace("--", "/", 1)
+        repo = folder_repo(repo_dir.name)
         blob_dir = repo_dir / "blobs"
         if blob_dir.is_dir():
             # A repo blob is named by its SHA-256. Since huggingface_hub 1.32 it is a link into a shared

@@ -5,6 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from pirateface._folders import folder_repo
 from pirateface._regex import EXTRA, SHARD, WEIGHT
 from pirateface.client import api
 from pirateface.config import API
@@ -45,7 +46,7 @@ def plan_cache():
     licenses = hub.licenses_or_fail()
     ids = [lic["id"] for lic in licenses["licenses"]]
     for snap in sorted(cache.glob("models--*/snapshots/*")):
-        repo = snap.parent.parent.name.removeprefix("models--").replace("--", "/", 1)
+        repo = folder_repo(snap.parent.parent.name)
         rev = snap.name
 
         def row(status, why, size="-", repo=repo, rev=rev, snap=snap):

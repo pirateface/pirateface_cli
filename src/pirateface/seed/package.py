@@ -8,6 +8,7 @@ from pathlib import Path
 
 import libtorrent as lt
 
+from pirateface._folders import repo_folder
 from pirateface.config import SEEDS
 from pirateface.listing import listing_problems, unsafe_path
 
@@ -49,7 +50,7 @@ def seeds_folder(repo, v1):
     """The seed folder for a repo: author--model, as the Hugging Face cache names it, so two authors can
     publish models of the same name. An old <model> folder that already holds this same torrent keeps its
     place (its .torrent has this v1 infohash): nothing is renamed or moved, so a client seeding it is fine."""
-    old, new = Path(repo.split("/")[1]), Path(repo.replace("/", "--"))
+    old, new = Path(repo.split("/")[1]), Path(repo_folder(repo))
     for tor in Path(SEEDS, old).glob("*.torrent"):
         with contextlib.suppress(Exception):  # unreadable or not a torrent: not this one
             if str(lt.torrent_info(tor.read_bytes()).info_hashes().v1) == v1:

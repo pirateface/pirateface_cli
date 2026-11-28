@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 from pirateface import ui
 from pirateface._atomic import write_bytes
-from pirateface._files import size_matches
+from pirateface._files import size_matches, warn_skip
 from pirateface._folders import folder_repo
 from pirateface._hash import sha256_file
 from pirateface._regex import REPO_LINE
@@ -135,12 +135,6 @@ def _search_ollama(queries):
     return repos
 
 
-def _warn_skip(source):
-    """Print the "unreadable or wrong size" line for a source that exists but does not match size."""
-    if source is not None and (source.is_file() or source.exists()):
-        print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
-
-
 def _source_for(path, digest, size, blobs, snapshots):
     if not isinstance(digest, str) or not SHA256.fullmatch(digest):
         return None
@@ -148,11 +142,11 @@ def _source_for(path, digest, size, blobs, snapshots):
     source = blobs.get(digest)
     if size_matches(source, size):
         return source
-    _warn_skip(source)
+    warn_skip(source)
     for snapshot in snapshots:
         source = snapshot / PurePosixPath(path)
         if not size_matches(source, size):
-            _warn_skip(source)
+            warn_skip(source)
             continue
         cached = _cached_file(source)
         if cached:

@@ -142,17 +142,22 @@ def _source_for(path, digest, size, blobs, snapshots):
     source = blobs.get(digest)
     if size_matches(source, size):
         return source
+    if source is not None and (source.is_file() or source.exists()):
+        print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
     for snapshot in snapshots:
         source = snapshot / PurePosixPath(path)
-        if size_matches(source, size):
-            cached = _cached_file(source)
-            if cached:
-                if cached[0] == digest:
-                    return cached[1]
-                continue
-            source = source.resolve()
-            if _sha256(source) == digest:
-                return source
+        if not size_matches(source, size):
+            if source.is_file() or source.exists():
+                print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
+            continue
+        cached = _cached_file(source)
+        if cached:
+            if cached[0] == digest:
+                return cached[1]
+            continue
+        source = source.resolve()
+        if _sha256(source) == digest:
+            return source
     return None
 
 

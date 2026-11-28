@@ -14,8 +14,6 @@ from pirateface._hash import sha256_file
 from pirateface.client.api import Unreachable, Unreadable, rows_by_sha256
 from pirateface.config import MIN_FILE_BYTES
 
-MIN_FILE_SIZE = MIN_FILE_BYTES
-
 
 def find(path, out=sys.stdout):
     """Print every listed model whose sha256 the file matches. Exit code: 0 if any found, 1 otherwise."""
@@ -28,9 +26,9 @@ def find(path, out=sys.stdout):
     except OSError as e:
         print(f"error: {path} is not a file ({e})", file=sys.stderr)
         return 1
-    if file_size < MIN_FILE_SIZE:
+    if file_size < MIN_FILE_BYTES:
         print(
-            f"error: {path} is under {MIN_FILE_SIZE // (1 << 20)} MiB; too small to identify by sha256",
+            f"error: {path} is under {MIN_FILE_BYTES // (1 << 20)} MiB; too small to identify by sha256",
             file=sys.stderr,
         )
         return 1

@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from pirateface._atomic import write_bytes
 from pirateface._regex import COMMIT_ANY, REPO_STRICT, WEIGHT
 from pirateface.client import api, torrent
 from pirateface.config import API, SEEDS
@@ -77,7 +78,7 @@ def seed_listed(repo, src, key, per_file=False):
     have = package.link_existing(src, save_dir if single else save_dir / name, paths) if src else 0
     torrent_path = out / f"{name}.torrent"
     out.mkdir(parents=True, exist_ok=True)  # link_existing makes it only when there is a file to link
-    torrent_path.write_bytes(data)
+    write_bytes(torrent_path, data)
     rest = "" if have == len(paths) else "; the client downloads the rest"
     print(f"==> {repo} is on Pirate Face. You have {have} of its {len(paths)} files{rest}.")
     upgrade.nudge(repo, name)

@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from tqdm.auto import tqdm
 
 from pirateface import ui
+from pirateface._atomic import write_bytes
 from pirateface._hash import sha256_file
 from pirateface._regex import REPO_LINE
 from pirateface.client import api, torrent
@@ -244,7 +245,7 @@ def _seed(candidate, qbt, trackers, per_file):
         print("    qBittorrent's recheck was below 100%; removed the torrent and kept it off the cache files.")
         return
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"{candidate.name}.torrent").write_bytes(data)
+    write_bytes(out / f"{candidate.name}.torrent", data)
     total = sum(path.stat().st_size for path in candidate.files.values())
     print(f"    qBittorrent verified {ui.gb(total)} and is seeding {candidate.repo}.")
     if per_file:

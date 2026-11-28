@@ -22,6 +22,7 @@ pf work                    # build torrents for queued model requests, streamed 
 pf restore PATH            # upload .torrent files to fix a listing whose magnet stalls
 pf index [--sync]          # the cached magnet index: what it holds, and mirror the newest build
 pf find-model FILE         # which listed models hold this file (sha256)
+pf verify <path...>       # who published a local file (--index for a trust-index.jsonl.gz offline)
 pf dedupe                  # duplicate Hugging Face cache blobs (--apply to hardlink, default dry run)
 ```
 

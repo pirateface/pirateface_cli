@@ -88,6 +88,7 @@ def _main():
             "  pf restore PATH              put a .torrent back on a listing\n"
             "  pf index [--sync|--add]      show the cached index, mirror it, or add it to qBittorrent\n"
             "  pf find-model FILE           what listed models hold this file (sha256)\n"
+            "  pf verify <path...>          who published a local file (--index for offline)\n"
             "  pf dedupe                    find duplicate Hugging Face cache blobs (--apply to hardlink)"
         ),
     )
@@ -236,9 +237,10 @@ def _main():
     )
     f.add_argument("file", help="the local file to identify")
 
-    from pirateface import dedupe
+    from pirateface import dedupe, verify
 
     dedupe.register(sub)
+    verify.register(sub)
     args = p.parse_args()
 
     if args.cmd == "index":
@@ -258,6 +260,9 @@ def _main():
         from pirateface import find_model
 
         return find_model.find(args.file)
+
+    if args.cmd == "verify":
+        return verify.run(args)
 
     if args.cmd == "work":
         from pirateface import work

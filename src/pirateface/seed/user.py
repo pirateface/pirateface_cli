@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from pirateface.client import api
-from pirateface.config import API
+from pirateface.config import API, MAX_UPLOAD_BYTES, TORRENT_OVERSIZE_MESSAGE
 from pirateface.seed import clients
 
 # %APPDATA% on Windows, else $XDG_CONFIG_HOME or ~/.config (where package.sh kept it).
@@ -87,3 +87,10 @@ def seeding_tracker_or_fail():
     if not mine:
         raise SeedError(f"could not get your seeding tracker from {API}/api/trackers (key rejected or site down)")
     return mine
+
+
+def torrent_size_or_fail(data):
+    """The one place that turns an oversized torrent into a fatal SeedError. pf work and pf submit both
+    guard the torrent they are about to upload; this keeps the two in step."""
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise SeedError(TORRENT_OVERSIZE_MESSAGE)

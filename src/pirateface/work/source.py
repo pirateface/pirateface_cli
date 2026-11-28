@@ -57,7 +57,6 @@ def _wait(error, attempt):
     return _backoff(attempt)
 
 
-
 def _open(url, headers, path, offset=0):
     """(response, the file's full length or None), starting at offset. Retries the connection; a 4xx other
     than a waitable one is raised at once, since retrying will not change it."""

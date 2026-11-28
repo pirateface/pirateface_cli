@@ -13,8 +13,8 @@ import libtorrent as lt
 # Names Windows can't store: reserved device names (with any extension), <>:"\|?* and control
 # characters, and a trailing dot or space.
 # Win32 also reserves ISO-8859-1 superscripts COM¹–³ / LPT¹–³  # noqa: RUF003
-WINDOWS_RESERVED = re.compile(r"(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])(\..*)?", re.IGNORECASE)
-WINDOWS_INVALID = re.compile(r'[<>:"\\|?*\x00-\x1f]|[. ]$')
+_WINDOWS_RESERVED = re.compile(r"(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])(\..*)?", re.IGNORECASE)
+_WINDOWS_INVALID = re.compile(r'[<>:"\\|?*\x00-\x1f]|[. ]$')
 
 
 def unsafe_path(rel, windows=True):
@@ -24,12 +24,12 @@ def unsafe_path(rel, windows=True):
     for part in rel.split("/"):
         if part in ("", ".", "..") or "\\" in part:
             return f"{rel}: leaves its folder"
-        if windows and (WINDOWS_RESERVED.fullmatch(part) or WINDOWS_INVALID.search(part)):
+        if windows and (_WINDOWS_RESERVED.fullmatch(part) or _WINDOWS_INVALID.search(part)):
             return f"{rel}: not a valid file name on Windows"
     return None
 
 
-def collisions(paths):
+def _collisions(paths):
     """Paths that would land on one file: one name once case is folded, or a file that is also a folder."""
     files = {}
     for p in paths:
@@ -47,13 +47,13 @@ def collisions(paths):
 def info_problems(info, paths):
     """Why this torrent's info dict and its paths (see torrent.files_in) can't be written under a folder as-is,
     or []. Windows-only names are refused on Windows only: a listing that is already published stays usable
-    where the names are legal. Case-folded collisions are refused even where this disk can store both files:
-    see `collisions` for which pairs.
+    where the names are legal. Case-folded name collisions are refused even where this disk can store both
+    files: see `_collisions` for which pairs.
     """
     windows = os.name == "nt"
     paths = list(paths)  # read twice below, and by the caller's iterator otherwise
     problems = [why for p in paths if (why := unsafe_path(p, windows=windows))]
-    problems += collisions(paths)
+    problems += _collisions(paths)
     problems += [
         "/".join(p.decode(errors="replace") for p in f[b"path"]) + ": a symlink"
         for f in info.get(b"files") or []

@@ -25,7 +25,7 @@ def run(yes):
     except clients.LoginRefused as e:
         raise SeedError(str(e)) from e
     except Exception as e:
-        raise SeedError(f"qBittorrent is not reachable; configure its Web UI ({clients.HELP})") from e
+        raise clients.qbittorrent_unreachable() from e
     mirror.sync()  # get the current build, exactly what `pf index --sync` fetches
     if mirror.broken():
         print("a removals list could not be read, so nothing can be added: run `pf index --sync`")

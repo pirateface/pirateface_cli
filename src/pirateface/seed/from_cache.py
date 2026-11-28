@@ -285,7 +285,7 @@ def seed_from_cache(per_file=True):
     except clients.LoginRefused as error:
         raise SeedError(str(error)) from error
     except Exception as error:
-        raise SeedError(f"qBittorrent is not reachable; configure its Web UI ({clients.HELP})") from error
+        raise clients.qbittorrent_unreachable() from error
     key = trackers = None
     for candidate in candidates:
         if not user.YES and not user.ask(

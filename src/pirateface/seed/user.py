@@ -78,3 +78,12 @@ def seeding_tracker():
     except Exception:
         return None
     return mine if SEEDING_TRACKER.fullmatch(mine) else None
+
+
+def seeding_tracker_or_fail():
+    """seeding_tracker(), or the one SeedError that names where it comes from. The single place that turns a
+    missing tracker into a fatal error, so pf seed --update-trackers and pf index --add cannot drift apart."""
+    mine = seeding_tracker()
+    if not mine:
+        raise SeedError(f"could not get your seeding tracker from {API}/api/trackers (key rejected or site down)")
+    return mine

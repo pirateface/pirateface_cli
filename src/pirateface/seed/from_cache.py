@@ -47,6 +47,22 @@ def _cached_file(path):
     return None
 
 
+def _blobs_by_digest(blob_dir, prefix="", exclude_symlinks=False):
+    """Digest-keyed resolved paths for regular blob files named by their sha256 (or sha256-<digest> with prefix).
+
+    The blob name is the key, not its target: a huggingface_hub 1.32 link into a shared Xet-hash store is
+    still keyed by its own name."""
+    blobs = {}
+    for blob in blob_dir.iterdir():
+        digest = blob.name.removeprefix(prefix)
+        if not SHA256.fullmatch(digest) or not blob.is_file():
+            continue
+        if exclude_symlinks and blob.is_symlink():
+            continue
+        blobs[digest.lower()] = blob.resolve()
+    return blobs
+
+
 def _huggingface_cache():
     from huggingface_hub import constants
 
@@ -61,9 +77,8 @@ def _huggingface_cache():
         if blob_dir.is_dir():
             # A repo blob is named by its SHA-256. Since huggingface_hub 1.32 it is a link into a shared
             # store named by Xet hash, so the key is the link's own name, not its target's.
-            for blob in blob_dir.iterdir():
-                if SHA256.fullmatch(blob.name) and blob.is_file():
-                    blobs.setdefault(blob.name.lower(), blob.resolve())
+            for digest, path in _blobs_by_digest(blob_dir).items():
+                blobs.setdefault(digest, path)
         for snapshot in sorted((repo_dir / "snapshots").glob("*")):
             snapshots.setdefault(repo, {})[snapshot.name] = snapshot
     return snapshots, blobs, root
@@ -88,10 +103,7 @@ def _ollama_cache():
     blob_dir = root / "blobs"
     manifests = root / "manifests"
     if blob_dir.is_dir():
-        for blob in blob_dir.iterdir():
-            digest = blob.name.removeprefix("sha256-")
-            if SHA256.fullmatch(digest) and blob.is_file() and not blob.is_symlink():
-                blobs.setdefault(digest.lower(), blob.resolve())
+        blobs = _blobs_by_digest(blob_dir, prefix="sha256-", exclude_symlinks=True)
     if manifests.is_dir():
         for manifest in manifests.rglob("*"):
             if not manifest.is_file() or manifest.is_symlink():

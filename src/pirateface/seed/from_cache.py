@@ -135,6 +135,12 @@ def _search_ollama(queries):
     return repos
 
 
+def _warn_skip(source):
+    """Print the "unreadable or wrong size" line for a source that exists but does not match size."""
+    if source is not None and (source.is_file() or source.exists()):
+        print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
+
+
 def _source_for(path, digest, size, blobs, snapshots):
     if not isinstance(digest, str) or not SHA256.fullmatch(digest):
         return None
@@ -142,13 +148,11 @@ def _source_for(path, digest, size, blobs, snapshots):
     source = blobs.get(digest)
     if size_matches(source, size):
         return source
-    if source is not None and (source.is_file() or source.exists()):
-        print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
+    _warn_skip(source)
     for snapshot in snapshots:
         source = snapshot / PurePosixPath(path)
         if not size_matches(source, size):
-            if source.is_file() or source.exists():
-                print(f"Skipping {source}: unreadable or wrong size", file=sys.stderr)
+            _warn_skip(source)
             continue
         cached = _cached_file(source)
         if cached:

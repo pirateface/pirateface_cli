@@ -37,6 +37,10 @@ class Candidate:
     leechers: int
 
 
+def _matches_size(source, size):
+    return source is not None and source.is_file() and source.stat().st_size == size
+
+
 def _cached_file(path):
     """Return (sha256, real file path) when the cache names this file by its SHA-256."""
     target = path.parent / path.readlink() if path.is_symlink() else path
@@ -139,11 +143,11 @@ def _source_for(path, digest, size, blobs, snapshots):
         return None
     digest = digest.lower()
     source = blobs.get(digest)
-    if source and source.is_file() and source.stat().st_size == size:
+    if _matches_size(source, size):
         return source
     for snapshot in snapshots:
         source = snapshot / PurePosixPath(path)
-        if source.is_file() and source.stat().st_size == size:
+        if _matches_size(source, size):
             cached = _cached_file(source)
             if cached:
                 if cached[0] == digest:

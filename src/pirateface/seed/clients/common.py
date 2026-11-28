@@ -12,12 +12,12 @@ class LoginRefused(Exception):
     """The client answered but wouldn't let us in: worth telling the user, unlike a client that isn't running."""
 
 
-PIRATEFACE = re.compile(r"^(udp|https?)://tracker\.pirateface\.co[:/]")
+_PIRATEFACE = re.compile(r"^(udp|https?)://tracker\.pirateface\.co[:/]")
 KEYED = re.compile(r"^https?://tracker\.pirateface\.co:6970/[0-9a-f]+/announce$")
 
 
 def is_pirateface(urls):
-    return any(PIRATEFACE.match(u) for u in urls)
+    return any(_PIRATEFACE.match(u) for u in urls)
 
 
 def tracker_update_loop(torrents, mine, get_urls, mutate):

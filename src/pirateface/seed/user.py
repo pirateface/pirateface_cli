@@ -89,8 +89,14 @@ def seeding_tracker_or_fail():
     return mine
 
 
+def torrent_oversize(size):
+    """Whether a .torrent of this many bytes is over the upload limit. The guard itself, shared by the
+    fatal callers (work, submit) and the per-file skip in pf restore."""
+    return size > MAX_UPLOAD_BYTES
+
+
 def torrent_size_or_fail(data):
     """The one place that turns an oversized torrent into a fatal SeedError. pf work and pf submit both
     guard the torrent they are about to upload; this keeps the two in step."""
-    if len(data) > MAX_UPLOAD_BYTES:
+    if torrent_oversize(len(data)):
         raise SeedError(TORRENT_OVERSIZE_MESSAGE)

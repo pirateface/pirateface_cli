@@ -5,6 +5,7 @@ import http.client
 import json
 import re
 
+from pirateface._http import retryable_status
 from pirateface.client import api
 from pirateface.config import API
 
@@ -23,7 +24,7 @@ def request(path, key, body, timeout=120):
 def transient(status):
     """A status worth asking again after a pause: no answer, a timeout, rate limiting, a 3xx this client
     cannot turn into an answer, or a server error."""
-    return status == 0 or status in {408, 425, 429} or 300 <= status < 400 or status >= 500
+    return status == 0 or retryable_status(status)
 
 
 def held_lease_id(answer):

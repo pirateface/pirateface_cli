@@ -74,3 +74,9 @@ def request(url, headers=None, data=None, method=None):
         headers={"User-Agent": user_agent(), **(headers or {})},
         method=method,
     )
+
+
+def retryable_status(status):
+    """A status worth asking again after a pause: a timeout, rate limiting, a 3xx this client cannot turn
+    into an answer, or a server error."""
+    return status in (408, 425, 429) or 300 <= status < 400 or status >= 500

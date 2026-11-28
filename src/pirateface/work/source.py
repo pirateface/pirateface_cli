@@ -38,6 +38,11 @@ class RateLimiter:
             time.sleep(delay)
 
 
+def _backoff(attempt):
+    """The plain exponential wait before a retry: 1 s, 2 s, 4 s, ..."""
+    return float(2**attempt)
+
+
 def _wait(error, attempt):
     """Seconds to wait before trying again: Retry-After when Hugging Face sends one, else backoff."""
     header = getattr(error, "headers", None)
@@ -49,7 +54,8 @@ def _wait(error, attempt):
             secs = 0.0  # an HTTP date, or junk
         if secs > 0:
             return min(secs, MAX_WAIT)
-    return float(2**attempt)
+    return _backoff(attempt)
+
 
 
 def _open(url, headers, path, offset=0):
@@ -71,7 +77,7 @@ def _open(url, headers, path, offset=0):
         except (urllib.error.URLError, TimeoutError) as e:
             last = e
             if attempt < ATTEMPTS - 1:
-                time.sleep(2**attempt)
+                time.sleep(_backoff(attempt))
             continue
         if offset and resp.status != 206:
             resp.close()
@@ -111,7 +117,7 @@ class Stream:
                 f"{self.path}: the connection to Hugging Face kept dropping ({error or 'ended early'})"
             )
         self.resp.close()
-        time.sleep(2**self.drops)
+        time.sleep(_backoff(self.drops))
         self.resp, self.length = _open(self.url, self.headers, self.path, at)
 
     def read(self, n):

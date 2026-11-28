@@ -7,7 +7,7 @@ from pathlib import Path
 
 import libtorrent as lt
 
-from pirateface.client.torrent import real_files
+from pirateface.client.files import real_files
 from pirateface.config import MIN_FILE_BYTES
 
 

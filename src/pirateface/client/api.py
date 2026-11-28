@@ -309,16 +309,20 @@ def licenses():
 
 VERSION = _version()
 
+# The shape of a release number, shared by the minVersion check and the release comparison: 1.2.3, not
+# 1.2.x or 1.2-beta. A suffix ("-dev1") is matched by _release but rejected by the minVersion check.
+_VERSION_SHAPE = r"\d+(?:\.\d+)*"
+
 
 def min_client_version():
     """The oldest pirateface Pirate Face takes submissions from (GET /api/cli), or None if it doesn't say."""
     answer = _get_json("/api/cli", 15)  # None from an older site without /api/cli, or offline
     minimum = answer.get("minVersion") if isinstance(answer, dict) else None
-    return minimum if isinstance(minimum, str) and re.fullmatch(r"\d+(\.\d+)*", minimum) else None
+    return minimum if isinstance(minimum, str) and re.fullmatch(_VERSION_SHAPE, minimum) else None
 
 
 def _release(v):
-    return [int(x) for x in re.match(r"\d+(?:\.\d+)*", v).group().split(".")]
+    return [int(x) for x in re.match(_VERSION_SHAPE, v).group().split(".")]
 
 
 def older(a, b):

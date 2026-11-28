@@ -310,15 +310,19 @@ def licenses():
 VERSION = _version()
 
 
+# The shape of a dotted version number, shared by min_client_version's check and _release's parse.
+VERSION_SHAPE = re.compile(r"\d+(?:\.\d+)*")
+
+
 def min_client_version():
     """The oldest pirateface Pirate Face takes submissions from (GET /api/cli), or None if it doesn't say."""
     answer = _get_json("/api/cli", 15)  # None from an older site without /api/cli, or offline
     minimum = answer.get("minVersion") if isinstance(answer, dict) else None
-    return minimum if isinstance(minimum, str) and re.fullmatch(r"\d+(\.\d+)*", minimum) else None
+    return minimum if isinstance(minimum, str) and VERSION_SHAPE.fullmatch(minimum) else None
 
 
 def _release(v):
-    return [int(x) for x in re.match(r"\d+(?:\.\d+)*", v).group().split(".")]
+    return [int(x) for x in VERSION_SHAPE.match(v).group().split(".")]
 
 
 def older(a, b):

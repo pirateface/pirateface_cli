@@ -11,3 +11,9 @@ def folder_repo(folder):
     """The author/model repo an HF cache folder name (models--<author>--<model>) names. The models-- prefix is
     stripped first, then only the first -- is a separator (so an author named "models" parses correctly)."""
     return folder.removeprefix("models--").replace("--", "/", 1)
+
+
+def seed_folder_repo(folder):
+    """The repo a bare seed folder (<author>--<model>) names: split on the first -- only. The models--
+    prefix folder_repo strips does not occur here — pf seeds into its own <author>--<model> folders."""
+    return folder.replace("--", "/", 1)

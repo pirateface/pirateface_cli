@@ -14,9 +14,18 @@ __all__ = [
     "QBittorrent",
     "add",
     "is_pirateface",
+    "qbittorrent_unreachable",
     "running",
     "update_trackers",
 ]
+
+
+def qbittorrent_unreachable():
+    """The one SeedError for a qBittorrent that did not answer (not running, remote access off). Raised by
+    the two callers that add a torrent; a login refusal keeps its own message, which names the cause."""
+    from pirateface.seed import user  # user imports this module
+
+    return user.SeedError(f"qBittorrent is not reachable; configure its Web UI ({HELP})")
 
 
 def running():

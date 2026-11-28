@@ -243,6 +243,14 @@ def _print_report(
             print(f"  {e}")
 
 
+def _skip(blob, tmp, why):
+    """Print the skip line for blob and drop the temp file, so the original stays put."""
+    print(f"skip {blob}: {why}", file=sys.stderr)
+    with contextlib.suppress(OSError):
+        tmp.unlink()
+    return False
+
+
 def _link_to(target_path, blob):
     if _same_file(target_path, blob):
         return True
@@ -257,28 +265,18 @@ def _link_to(target_path, blob):
     try:
         os.link(target_path, tmp)
     except OSError as e:
-        print(f"skip {blob}: {e}", file=sys.stderr)
-        return False
+        return _skip(blob, tmp, e)
     try:
         after = blob.stat()
     except OSError as e:
-        print(f"skip {blob}: {e}", file=sys.stderr)
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        return False
+        return _skip(blob, tmp, e)
     # The file changed between our check and the link: keep the original.
     if after.st_ino != before.st_ino or after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
-        print(f"skip {blob}: file changed during dedupe", file=sys.stderr)
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        return False
+        return _skip(blob, tmp, "file changed during dedupe")
     try:
         tmp.replace(blob)
     except OSError as e:
-        print(f"skip {blob}: {e}", file=sys.stderr)
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        return False
+        return _skip(blob, tmp, e)
     if not _same_file(target_path, blob):
         print(f"skip {blob}: replacement did not take effect", file=sys.stderr)
         return False

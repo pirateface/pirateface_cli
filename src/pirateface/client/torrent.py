@@ -155,6 +155,7 @@ def _wait_until(condition, timeout, on_timeout, *, sleep):
 
 def _wait_for_metadata(repo_id, h):
     """Block until the torrent has its file list, or forget the repo and time out."""
+
     def _timeout():
         _get_session().remove_torrent(h)
         _remember(repo_id, RepoState.NO_SWARM)
@@ -232,6 +233,7 @@ def _choose_by_piece(h):
     piece parked in libtorrent's part file, and switching that file on while the piece is half-downloaded
     fails with "file too short" and stops the torrent. Nothing is downloaded yet, so this switch is safe."""
     h.prioritize_files([4] * h.torrent_file().num_files())
+
     # Applied all at once by a disk job, which then resets piece priorities; pad files stay at 0.
     def _timeout():
         raise TimeoutError("libtorrent didn't apply the file priorities")

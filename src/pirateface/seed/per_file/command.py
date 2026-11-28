@@ -21,6 +21,15 @@ def qbittorrent():
     return next((c for c in clients.running() if isinstance(c, clients.QBittorrent)), None)
 
 
+def require_qbittorrent():
+    """The running qBittorrent, or the SeedError that names what it needs. Shared by the callers that cannot
+    proceed without one."""
+    qbt = qbittorrent()
+    if not qbt:
+        raise SeedError(NEEDS_QBITTORRENT)
+    return qbt
+
+
 def _load(data, v1):
     """The .torrent's bytes libtorrent will take: data itself, or the site's stored copy of the same torrent
     when libtorrent rejects data (as it does a qBittorrent export of a hybrid, whose piece layers it calls
@@ -158,9 +167,7 @@ def update_all():
     can act on: v1-only models (pf seed --upgrade switches any their uploader made hybrid; if you uploaded
     one, pf seed --upgrade org/model) and ones that aren't complete yet."""
     print("==> Adding per-file swarms for the Pirate Face torrents you seed")
-    qbt = qbittorrent()
-    if not qbt:
-        raise SeedError(NEEDS_QBITTORRENT)
+    qbt = require_qbittorrent()
     adder = Adder(qbt, mine=seeding_tracker())
     v1_only, incomplete = scan(qbt, adder)
     report(v1_only, incomplete, adder)

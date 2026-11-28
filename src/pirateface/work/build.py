@@ -3,6 +3,7 @@
 import time
 
 from pirateface import ui
+from pirateface._folders import repo_model
 from pirateface.seed import hybrid
 from pirateface.work import checkpoint, source
 from pirateface.work.errors import WorkError
@@ -107,7 +108,7 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
         finished = {f["path"]: (f["size"], *map(bytes.fromhex, f["hashes"])) for f in done}
         sources = [(f["path"].split("/"), lambda f=f: opener(f["path"])) for f in files]
         data, v1, _v2 = hybrid.build_from(
-            repo.split("/")[1],
+            repo_model(repo),
             sources,
             trackers,
             plen,

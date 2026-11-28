@@ -2,6 +2,11 @@
 pf's own seed folders (<author>--<model>) encode a repo as author--model."""
 
 
+def repo_model(repo):
+    """The model part of a repo id (the author/model suffix)."""
+    return repo.split("/")[1]
+
+
 def repo_folder(repo):
     """The author--model folder name for a repo (the HF cache and the seed folder's shared naming)."""
     return repo.replace("/", "--")

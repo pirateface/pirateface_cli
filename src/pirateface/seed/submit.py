@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pirateface import ui
 from pirateface._atomic import write_bytes
-from pirateface._folders import repo_folder
+from pirateface._folders import repo_folder, repo_model
 from pirateface._regex import COMMIT_ANY as COMMIT
 from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
@@ -255,7 +255,7 @@ def submit_new(
     """Package src, check it against Hugging Face (unless direct), start seeding, then submit.
     A dry run stops before the torrent client and the POST, and prints what it would send."""
     check_client_version()
-    name = name or repo.split("/")[1]
+    name = name or repo_model(repo)
     # The shared-seeds default keeps each author in their own author--model folder (seed/package.py:seeds_folder
     # applies the same name; seed_listed reuses an old <model> folder that already holds the torrent). An
     # explicit out is used as given; pf submit's own ./pirateface-NAME default is one.

@@ -116,6 +116,12 @@ def _hash_candidates(entries):
     return [(p, s, d, i, k, r, n) for p, s, d, i, k, r, n in entries if len(sizes[s]) >= 2]
 
 
+def _unpinned_reclaim(files):
+    """Bytes a per-repo duplicate group could reclaim: every file after the keep one, unless pinned by other
+    hardlinks (whose inodes survive the replacement, so they reclaim nothing)."""
+    return sum(size for _, _, size, nlink in files[1:] if nlink <= 1)
+
+
 def _same_file(a, b):
     try:
         sa, sb = a.stat(), b.stat()
@@ -225,7 +231,7 @@ def _print_report(
             f"cross-repo / per-repo duplicates in {len(per_repo_dups)} group(s) (not shared-store overlap): ~{per_repo_reclaim:,} bytes reclaimable"
         )
         for digest, files in list(per_repo_dups.items())[:10]:
-            reclaimable = sum(size for _, _, size, nlink in files[1:] if nlink <= 1)
+            reclaimable = _unpinned_reclaim(files)
             print(f"  {reclaimable:>12,} B  sha256={digest[:16]}…  in {len(files)} per-repo blob(s)")
         if pinned_per_repo_files:
             print(
@@ -332,7 +338,7 @@ def run(args):
         for _r, blob, size, nlink in files[1:]
         if nlink > 1
     ]
-    per_repo_reclaim = sum(size for files in per_repo_dups.values() for _r, _b, size, nlink in files[1:] if nlink <= 1)
+    per_repo_reclaim = sum(_unpinned_reclaim(files) for files in per_repo_dups.values())
     pinned_dup_files = len(pinned_dups)
     pinned_dup_bytes = sum(size for _r, _b, size, _dg, _nl in pinned_dups)
     pinned_per_repo_files = len(pinned_per_repo)

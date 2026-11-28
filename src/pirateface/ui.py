@@ -75,7 +75,7 @@ def gb(n):
     return f"{n / 1e9:.2f} GB"
 
 
-def mb(n):
+def _mb(n):
     if n >= 1e9:
         return f"{n / 1e9:.1f} GB"
     return f"{n / 1e6:.1f} MB" if n >= 1e5 else f"{n / 1e3:.1f} kB"
@@ -94,7 +94,7 @@ def banner(repo_id, files, size, where="Pirate Face"):
     """`where` is where the file list came from: the site, or the cached index while it is down."""
     if not once(repo_id):
         return
-    note("swarm", f"{repo_id}  {files} files, {mb(size)}" + ("" if where == "Pirate Face" else f"  · {where}"))
+    note("swarm", f"{repo_id}  {files} files, {_mb(size)}" + ("" if where == "Pirate Face" else f"  · {where}"))
 
 
 def not_on_pirateface(repo_id, rescue_requested=False):
@@ -161,7 +161,7 @@ def sources_label(webseed, peers):
 def from_swarm(filename, size, checked_by="Hugging Face"):
     with _lock:
         _download_counts["swarm"] += 1
-    note("file", f"{filename}  {mb(size)}  fingerprint matches {checked_by}")
+    note("file", f"{filename}  {_mb(size)}  fingerprint matches {checked_by}")
 
 
 def from_index(filename, size, build, checked_by="Hugging Face"):
@@ -169,9 +169,9 @@ def from_index(filename, size, build, checked_by="Hugging Face"):
     with _lock:
         _download_counts["swarm"] += 1
     if checked_by == "Hugging Face":
-        note("file", f"{filename}  {mb(size)}  from the index (build {build}), fingerprint matches Hugging Face")
+        note("file", f"{filename}  {_mb(size)}  from the index (build {build}), fingerprint matches Hugging Face")
     else:
-        note("file", f"{filename}  {mb(size)}  from the index (build {build}), checked against {checked_by}")
+        note("file", f"{filename}  {_mb(size)}  from the index (build {build}), checked against {checked_by}")
 
 
 def from_hf(filename, reason=None):

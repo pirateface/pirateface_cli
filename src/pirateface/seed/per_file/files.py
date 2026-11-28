@@ -8,8 +8,9 @@ from pathlib import Path
 import libtorrent as lt
 
 from pirateface.client.torrent import real_files
+from pirateface.config import MIN_FILE_BYTES
 
-MIN_SIZE = 1 << 20  # configs and tokenizers aren't worth a swarm each
+MIN_SIZE = MIN_FILE_BYTES  # configs and tokenizers aren't worth a swarm each
 
 
 def local_files(data, save_dir):

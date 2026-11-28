@@ -16,24 +16,23 @@ def _work_name(value):
     return value
 
 
-def _max_size(value):
+def _validate(value, cast, ok, message):
+    """argparse `type` for a number: a value that is unparsable or outside `ok` is rejected with one message."""
     try:
-        size = int(value)
+        parsed = cast(value)
     except ValueError:
-        raise argparse.ArgumentTypeError("use a whole number of GiB (0 = no limit)") from None
-    if size < 0:
-        raise argparse.ArgumentTypeError("use a whole number of GiB (0 = no limit)")
-    return size
+        raise argparse.ArgumentTypeError(message) from None
+    if not ok(parsed):
+        raise argparse.ArgumentTypeError(message)
+    return parsed
+
+
+def _max_size(value):
+    return _validate(value, int, lambda n: n >= 0, "use a whole number of GiB (0 = no limit)")
 
 
 def _download_rate(value):
-    try:
-        rate = float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError("use a positive number of MB/s") from None
-    if not math.isfinite(rate) or rate <= 0:
-        raise argparse.ArgumentTypeError("use a positive number of MB/s")
-    return rate
+    return _validate(value, float, lambda n: n > 0 and math.isfinite(n), "use a positive number of MB/s")
 
 
 def _index(module, do_sync):

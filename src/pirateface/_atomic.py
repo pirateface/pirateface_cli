@@ -2,7 +2,26 @@
 
 import os
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
+
+
+@contextmanager
+def _temp_dest(dest):
+    """Yield the temp file path for dest (same folder, pid-named); replace it with dest on success.
+
+    Any failure before the rename removes the temp file, so a crash or a full disk leaves no half-written
+    file behind.
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.part")
+    try:
+        yield tmp
+        tmp.replace(dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def write_bytes(path, data, mode=None):
@@ -11,19 +30,13 @@ def write_bytes(path, data, mode=None):
     mode: the temp file's permission bits (e.g. 0o600 for a file readable by this user only); None keeps the
     default umask.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.part")
-    try:
+    with _temp_dest(path) as tmp:
         if mode is None:
             tmp.write_bytes(data)
         else:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
 
 
 def copy_file(src, dest):
@@ -32,12 +45,5 @@ def copy_file(src, dest):
     The temp name carries the pid, so concurrent copies cannot share one; a failure removes the temp file,
     so a crash or a full disk leaves no half-written file behind.
     """
-    dest = Path(dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.part")
-    try:
+    with _temp_dest(dest) as tmp:
         shutil.copyfile(src, tmp)
-        tmp.replace(dest)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise

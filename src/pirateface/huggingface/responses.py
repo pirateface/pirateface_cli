@@ -13,13 +13,20 @@ def fingerprint(found, path):
     return found["files"][path][1] or hashlib.sha256(f"{found['commit']}/{path}".encode()).hexdigest()
 
 
+def _revision_check(found, revision):
+    """The 404 for a revision that is not the one the listing names, or None when it is."""
+    if not known(found, revision):
+        return not_found("RevisionNotFound", f"Invalid rev id: {revision}")
+    return None
+
+
 def not_found(code, message):
     return 404, {"X-Error-Code": code, "X-Error-Message": message}, {"error": message}
 
 
 def info(found, _method, revision=None):
-    if not known(found, revision):
-        return not_found("RevisionNotFound", f"Invalid rev id: {revision}")
+    if (check := _revision_check(found, revision)) is not None:
+        return check
     siblings = [{"rfilename": p, "size": f[0]} for p, f in found["files"].items()]
     repo_id = found["repo_id"]
     body = {"id": repo_id, "modelId": repo_id, "author": repo_id.split("/")[0], "sha": found["commit"]}
@@ -27,8 +34,8 @@ def info(found, _method, revision=None):
 
 
 def tree(found, _method, revision, folder=None):
-    if not known(found, revision):
-        return not_found("RevisionNotFound", f"Invalid rev id: {revision}")
+    if (check := _revision_check(found, revision)) is not None:
+        return check
     prefix = f"{folder.strip('/')}/" if folder else ""
     return (
         200,
@@ -48,8 +55,8 @@ def tree(found, _method, revision, folder=None):
 
 
 def resolve(found, method, revision, filename):
-    if not known(found, revision):
-        return not_found("RevisionNotFound", f"Invalid rev id: {revision}")
+    if (check := _revision_check(found, revision)) is not None:
+        return check
     if filename not in found["files"]:
         return not_found("EntryNotFound", f"{filename} is not in this model")
     size, _, url = found["files"][filename]

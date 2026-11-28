@@ -12,7 +12,7 @@ import libtorrent as lt
 
 from pirateface.listing import info_problems, unsafe_path
 
-PAD_DIR = ".pad"  # pad bytes a creator wrote out by hand, without attr=p to say so
+_PAD_DIR = ".pad"  # pad bytes a creator wrote out by hand, without attr=p to say so
 
 
 class Unavailable(Exception):
@@ -28,7 +28,7 @@ class NotInTorrent(Unavailable):
     """The torrent's file list does not include this file: the swarm carries only part of the repo."""
 
 
-def web_seed_url(torrent, path_in_torrent):
+def _web_seed_url(torrent, path_in_torrent):
     """BEP 19: a base ending in "/" gets the file's path appended; otherwise it is the file itself."""
     seeds = torrent.get(b"url-list") or []
     seed = (seeds if isinstance(seeds, bytes) else seeds[0] if seeds else b"").decode()
@@ -42,7 +42,7 @@ def real_files(fs):
     return [i for i in range(fs.num_files()) if not fs.file_flags(i) & fs.flag_pad_file]
 
 
-def _relative(ti, i):
+def relative_path(ti, i):
     """The entry's path inside the torrent's folder (libtorrent prefixes the torrent name, and on Windows
     returns backslashes). The single place a torrent path becomes a relative one."""
     fs = ti.files()
@@ -50,10 +50,10 @@ def _relative(ti, i):
     return path.split("/", 1)[1] if fs.num_files() > 1 and "/" in path else path
 
 
-def _file_index(ti, filename):
+def file_index(ti, filename):
     fs = ti.files()
     for i in range(fs.num_files()):
-        if _relative(ti, i) == filename:
+        if relative_path(ti, i) == filename:
             return i
     return None
 
@@ -93,10 +93,10 @@ def files_in(data):
                 raise Unsafe(f"{name}: refusing {f[b'path']!r}: a path that is not UTF-8") from e
             if not parts:
                 raise Unsafe(f"{name}: a file in the torrent has no path")
-            if parts[0] == PAD_DIR:
+            if parts[0] == _PAD_DIR:
                 continue  # a pad folder written out by hand, without attr=p to say so
             entries.append(("/".join(parts), f[b"length"]))
     why = unsafe_path(name) or next(iter(info_problems(info, [p for p, _ in entries])), None)
     if why:
         raise Unsafe(f"{name}: refusing {why}")
-    return [(p, size, web_seed_url(torrent, name if single else f"{name}/{p}")) for p, size in entries]
+    return [(p, size, _web_seed_url(torrent, name if single else f"{name}/{p}")) for p, size in entries]

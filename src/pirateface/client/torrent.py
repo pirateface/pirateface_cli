@@ -16,10 +16,10 @@ from pirateface.client.files import (
     NotInTorrent,
     Unavailable,
     Unsafe,
-    _file_index,
-    _relative,
+    file_index,
     files_in,
     real_files,
+    relative_path,
 )
 
 CACHE_DIR = Path(config.CACHE_DIR)
@@ -329,7 +329,7 @@ def swarm_files(repo_id, magnet=None, where=None):
         h = _handle(repo_id, magnet=magnet, where=where)
         ti = h.torrent_file()
         fs = ti.files()
-        return [(_relative(ti, i), fs.file_size(i)) for i in real_files(fs)]
+        return [(relative_path(ti, i), fs.file_size(i)) for i in real_files(fs)]
 
 
 def _revive_if_finished(repo_id, h, magnet):
@@ -369,7 +369,7 @@ def fetch_file(repo_id, filename, stall_timeout=config.STALL_TIMEOUT, magnet=Non
         h = _revive_if_finished(repo_id, h, magnet)
 
         ti = h.torrent_file()
-        i = _file_index(ti, filename)
+        i = file_index(ti, filename)
         if i is None:
             raise NotInTorrent("not in the torrent")
         fs = ti.files()

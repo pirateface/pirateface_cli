@@ -47,3 +47,47 @@ jobs:
       - run: |
           smoke/bin/pf --help
           for cmd in seed submit work; do smoke/bin/pf "$cmd" --help; done
+
+  maintainer-identity:
+    # Maintainer commits must carry the project identity. Outside contributors are unaffected.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.user.login == 'pirateface') ||
+      (github.event_name == 'push' && github.actor == 'pirateface')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: |
+          allowed='^(help@pirateface\.co|([0-9]+\+)?pirateface@users\.noreply\.github\.com)$'
+          if [ "$EVENT" = pull_request ]; then
+            commits=$(git rev-list "$PR_BASE..$PR_HEAD")
+          elif [ -z "${PUSH_BEFORE//0/}" ]; then
+            commits=$PUSH_AFTER
+          else
+            commits=$(git rev-list "$PUSH_BEFORE..$PUSH_AFTER")
+          fi
+          fail=0
+          for c in $commits; do
+            # Web merges on main were already checked on their pull request.
+            if [ "$EVENT" = push ] && [ "$(git log -1 --format=%ce "$c")" = noreply@github.com ]; then
+              continue
+            fi
+            author=$(git log -1 --format=%ae "$c")
+            if ! grep -qE "$allowed" <<< "$author"; then
+              echo "::error::$c: author email is not the maintainer identity"; fail=1
+            fi
+            for email in $(git log -1 --format=%B "$c" | grep -i '^co-authored-by:' | sed -n 's/.*<\(.*\)>.*/\1/p'); do
+              if ! grep -qE "$allowed" <<< "$email"; then
+                echo "::error::$c: Co-authored-by trailer with a non-maintainer email"; fail=1
+              fi
+            done
+          done
+          exit $fail

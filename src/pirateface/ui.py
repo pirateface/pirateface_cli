@@ -24,12 +24,16 @@ def ansi(stream=sys.stdout):
     )
 
 
+def _ansi(text, stream, code):
+    return f"\033[{code}m{text}\033[0m" if ansi(stream) else text
+
+
 def _dim(text, stream):
-    return f"\033[2m{text}\033[0m" if ansi(stream) else text
+    return _ansi(text, stream, "2")
 
 
 def _bold(text, stream):
-    return f"\033[1m{text}\033[0m" if ansi(stream) else text
+    return _ansi(text, stream, "1")
 
 
 def _print(line):

@@ -13,6 +13,12 @@ _announced = set()
 _download_counts = {"swarm": 0, "hf": 0}
 
 
+def _count(kind):
+    """Bump one download-count bucket under the lock."""
+    with _lock:
+        _download_counts[kind] += 1
+
+
 def ansi(stream=sys.stdout):
     """Escape codes only on a terminal that shows them: not piped, not NO_COLOR, not TERM=dumb,
     and on Windows only in Windows Terminal (the classic console prints them as text)."""
@@ -159,15 +165,13 @@ def sources_label(webseed, peers):
 
 
 def from_swarm(filename, size, checked_by="Hugging Face"):
-    with _lock:
-        _download_counts["swarm"] += 1
+    _count("swarm")
     note("file", f"{filename}  {_mb(size)}  fingerprint matches {checked_by}")
 
 
 def from_index(filename, size, build, checked_by="Hugging Face"):
     """A file from the swarm the cached index names, and what its bytes were checked against."""
-    with _lock:
-        _download_counts["swarm"] += 1
+    _count("swarm")
     if checked_by == "Hugging Face":
         note("file", f"{filename}  {_mb(size)}  from the index (build {build}), fingerprint matches Hugging Face")
     else:
@@ -176,8 +180,7 @@ def from_index(filename, size, build, checked_by="Hugging Face"):
 
 def from_hf(filename, reason=None):
     if reason:
-        with _lock:
-            _download_counts["hf"] += 1
+        _count("hf")
         note("hf", f"{filename}  from Hugging Face ({reason})")
 
 

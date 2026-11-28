@@ -10,6 +10,7 @@ import urllib.parse
 from pathlib import Path
 
 from pirateface import ui
+from pirateface._atomic import write_bytes
 from pirateface._regex import COMMIT_ANY as COMMIT
 from pirateface._regex import REPO_STRICT as REPO
 from pirateface.client import api
@@ -267,7 +268,7 @@ def submit_new(
     with proofs.sidecar() as blocks:
         paths, sums, data, v1, v2 = build_torrent(src, save_dir, name, trackers, blocks)
         torrent_path = out / f"{name}.torrent"
-        torrent_path.write_bytes(data)
+        write_bytes(torrent_path, data)
 
         licenses = hub.licenses_or_fail()
         match = None

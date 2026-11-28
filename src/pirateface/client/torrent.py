@@ -144,15 +144,23 @@ def _torrent_params(repo_id, magnet, resume, cache_list=True):
     return atp, saved
 
 
+def _wait_until(condition, timeout, on_timeout, *, sleep):
+    """Poll until condition() is true or timeout passes, raising or calling on_timeout at the deadline."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            on_timeout()
+        time.sleep(sleep)
+
+
 def _wait_for_metadata(repo_id, h):
     """Block until the torrent has its file list, or forget the repo and time out."""
-    deadline = time.monotonic() + config.METADATA_TIMEOUT
-    while not h.status().has_metadata:
-        if time.monotonic() > deadline:
-            _get_session().remove_torrent(h)
-            _remember(repo_id, RepoState.NO_SWARM)
-            raise TimeoutError("no peer sent the file list in time")
-        time.sleep(0.2)
+    def _timeout():
+        _get_session().remove_torrent(h)
+        _remember(repo_id, RepoState.NO_SWARM)
+        raise TimeoutError("no peer sent the file list in time")
+
+    _wait_until(lambda: h.status().has_metadata, config.METADATA_TIMEOUT, _timeout, sleep=0.2)
 
 
 def _check_listing(repo_id, h, saved):
@@ -225,11 +233,10 @@ def _choose_by_piece(h):
     fails with "file too short" and stops the torrent. Nothing is downloaded yet, so this switch is safe."""
     h.prioritize_files([4] * h.torrent_file().num_files())
     # Applied all at once by a disk job, which then resets piece priorities; pad files stay at 0.
-    deadline = time.monotonic() + config.METADATA_TIMEOUT
-    while 4 not in h.get_file_priorities():
-        if time.monotonic() > deadline:
-            raise TimeoutError("libtorrent didn't apply the file priorities")
-        time.sleep(0.05)
+    def _timeout():
+        raise TimeoutError("libtorrent didn't apply the file priorities")
+
+    _wait_until(lambda: 4 in h.get_file_priorities(), config.METADATA_TIMEOUT, _timeout, sleep=0.05)
     h.prioritize_pieces([0] * h.torrent_file().num_pieces())
 
 

@@ -1,25 +1,20 @@
 """Private local lease for a work lane: the saved lease checkpoint, its exclusive lock and the shapes it
 has to be in to be trusted. The file/piece checkpoint machinery (paths, progress, block hashes) lives in
-work/checkpoint.py and is re-exported here so existing importers keep working unchanged."""
+work/checkpoint.py; importers use that module directly."""
 
 import contextlib
 import json
 import os
 
-from pirateface.work.checkpoint import _path, _write, blocks_path, clear_files, load_progress, save_files, sorted_files
+from pirateface.work.checkpoint import _path, _write, clear_files
 
 __all__ = [
     "CheckpointLocked",
-    "blocks_path",
     "clear",
-    "clear_files",
     "lease_path",
     "load",
-    "load_progress",
     "lock",
     "save",
-    "save_files",
-    "sorted_files",
 ]
 
 

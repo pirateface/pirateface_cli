@@ -96,6 +96,11 @@ def licenses_or_fail():
     return licenses
 
 
+def license_ids(licenses):
+    """The list of Pirate Face license ids the site lists."""
+    return [lic["id"] for lic in licenses["licenses"]]
+
+
 def license_id(card, licenses):
     """The card's license as a Pirate Face license id, else the card's first license, else "-"."""
     raw = card.get("license")
@@ -105,7 +110,7 @@ def license_id(card, licenses):
     named = names.get(str(card.get("license_name") or "").strip().lower())
     if "other" in found and named:
         found.append(named)
-    ids = [lic["id"] for lic in licenses["licenses"]]
+    ids = license_ids(licenses)
     return next((x for x in ids if x in found), found[0] if found else "-")
 
 

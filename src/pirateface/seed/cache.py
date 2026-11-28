@@ -44,7 +44,7 @@ def plan_cache():
         raise user.SeedError(f"no Hugging Face cache at {cache} (set HF_HUB_CACHE)")
     print(f"==> Checking models in {cache}")
     licenses = hub.licenses_or_fail()
-    ids = [lic["id"] for lic in licenses["licenses"]]
+    ids = hub.license_ids(licenses)
     for snap in sorted(cache.glob("models--*/snapshots/*")):
         repo = folder_repo(snap.parent.parent.name)
         rev = snap.name

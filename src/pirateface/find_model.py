@@ -12,8 +12,9 @@ from pathlib import Path
 from pirateface import ui
 from pirateface._hash import sha256_file
 from pirateface.client.api import Unreachable, Unreadable, rows_by_sha256
+from pirateface.config import MIN_FILE_BYTES
 
-MIN_FILE_SIZE = 1 << 20  # 1 MiB: tiny configs and tokenizers are too small to identify honestly by sha256
+MIN_FILE_SIZE = MIN_FILE_BYTES
 
 
 def find(path, out=sys.stdout):

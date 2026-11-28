@@ -6,6 +6,7 @@ from pathlib import Path
 import libtorrent as lt
 
 from pirateface import ui
+from pirateface._folders import folder_repo
 from pirateface.client import api
 from pirateface.seed import clients
 from pirateface.seed.per_file.adder import Adder
@@ -82,8 +83,8 @@ def repo_of(t):
     pf seeds every model into a <SEEDS>/<author>--<model>/files folder, so the parent folder names the repo."""
     folder = Path(t.get("save_path") or "").parent.name
     if folder and "--" in folder:
-        # Bare seed folder (<author>--<model>), no models-- prefix: split on the first -- only.
-        return folder.replace("--", "/", 1)
+        # Bare seed folder (<author>--<model>); folder_repo strips a models-- prefix if present.
+        return folder_repo(folder)
     return t.get("name") or t["hash"][:8]
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import libtorrent as lt
 
-from pirateface._files import size_matches
+from pirateface._files import size_matches, skip_line
 from pirateface.client.torrent import real_files
 from pirateface.config import MIN_FILE_BYTES
 
@@ -26,7 +26,7 @@ def local_files(data, save_dir):
             if size_matches(path, size):
                 found.append((path, str(fs.root(i))))
             else:
-                print(f"Skipping {path}: unreadable or wrong size", file=sys.stderr)
+                print(skip_line(path), file=sys.stderr)
     return found
 
 

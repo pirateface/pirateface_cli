@@ -28,7 +28,12 @@ def build(job, key, trackers, name=None, blocks=None, max_download_rate=None, *,
         partial = None
         checkpoint.save_files(job, plen, have_proofs, done, name)
     if blocks is not None:
-        if not done and partial is None and checkpoint.blocks_path(name).exists() and checkpoint.blocks_path(name).stat().st_size:
+        if (
+            not done
+            and partial is None
+            and checkpoint.blocks_path(name).exists()
+            and checkpoint.blocks_path(name).stat().st_size
+        ):
             print("    Discarding incomplete block hashes; no finished file was checkpointed.")
         kept = [(f["path"], hybrid.ceil_blocks(f["size"])) for f in done]
         if partial:

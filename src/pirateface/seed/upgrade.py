@@ -18,7 +18,7 @@ from pirateface.client import api, torrent
 from pirateface.config import API
 from pirateface.seed import clients, hybrid, package, user
 from pirateface.seed.clients.common import LoginRefused
-from pirateface.seed.per_file.command import NEEDS_QBITTORRENT, qbittorrent, seed_model
+from pirateface.seed.per_file.command import require_qbittorrent, seed_model
 from pirateface.seed.user import SeedError
 
 # The nudge is a note, not a wait: a slow or down client or site must never hold up `pf seed`.
@@ -44,13 +44,6 @@ class _ScanBudget:
 
     def expired(self):
         return self._deadline - time.monotonic() <= 0
-
-
-def _qbittorrent():
-    qbt = qbittorrent()
-    if not qbt:
-        raise SeedError(NEEDS_QBITTORRENT)
-    return qbt
 
 
 def listed_v1(repo, infohash=None):
@@ -106,7 +99,7 @@ def send_upgrade(key, v1, data, manifest):
 
 def rebuild(repo):
     key = user.load_key()
-    if upgrade_one(_qbittorrent(), key, repo) is None:
+    if upgrade_one(require_qbittorrent(), key, repo) is None:
         ui.layer_block([("model", "hybrid v1+v2")], "pf seed --upgrade")
 
 
@@ -169,7 +162,7 @@ def upgrade_mine():
     command. It keeps going on the ones that fail and prints the first MAX_PROBLEMS as a list at the end.
     Safe to rerun: a torrent whose .torrent is hybrid already is skipped."""
     key = user.load_key()
-    qbt = _qbittorrent()
+    qbt = require_qbittorrent()
     mine = api.my_torrents(key)
     if mine is None:
         raise SeedError(f"could not list your torrents from {API} (key rejected or site down)")
@@ -220,7 +213,7 @@ def superseded_in_client(repo=None, name=None):
     Best-effort: client or site failures, or a spent budget, yield the pairs found so far — the
     nudge is a note, never a wait."""
     try:
-        qbt = _qbittorrent()
+        qbt = require_qbittorrent()
         budget = _ScanBudget(NUDGE_TOTAL_BUDGET)
         torrents = _matching(qbt.torrents(timeout=budget.call_timeout(NUDGE_CALL_TIMEOUT)), name)
     except (SeedError, LoginRefused, OSError, http.client.HTTPException, ValueError, KeyError):
@@ -268,7 +261,7 @@ def switch_all():
     """Every v1-only Pirate Face torrent in qBittorrent that Pirate Face replaced: add the replacement on the same
     files, then drop the old one. qBittorrent checks the files against the new torrent; nothing is downloaded."""
     print("==> Switching replaced Pirate Face torrents in qBittorrent")
-    qbt = _qbittorrent()
+    qbt = require_qbittorrent()
     trackers = api.trackers(user.load_key())
     switched = skipped = 0
     for t in qbt.torrents():

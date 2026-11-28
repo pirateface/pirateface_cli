@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pirateface._http import NO_REDIRECTS
 from pirateface._http import open_request as _http_open_request
 from pirateface._http import request_json as _http_request_json
+from pirateface._http import retryable_status as _retryable_status
 from pirateface._http import version as _version
 from pirateface.config import API
 
@@ -111,7 +112,7 @@ def _get(url, timeout, limit=None, headers=None):
         with request(url, timeout, headers=headers) as r:
             return r.status, r.read(limit)
     except urllib.error.HTTPError as e:
-        if e.code in (408, 425, 429) or 300 <= e.code < 400 or e.code >= 500:
+        if _retryable_status(e.code):
             raise Unreachable(f"could not reach {API}") from e
         error = e
     except Exception as e:  # http.client.HTTPException (truncated body, bad status line) is not an OSError
